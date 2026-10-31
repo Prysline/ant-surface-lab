@@ -6,6 +6,8 @@ import {
   add, sub, mul, dot, length, unit, tangent, transport, clamp,
 } from './core.js';
 
+export const MINI_SCALE = 4;
+
 export const MINI = Object.freeze({
   floorY: -1.85,
   groundHalfX: 4.0,
@@ -15,12 +17,12 @@ export const MINI = Object.freeze({
   legOffset: 1.53,
   legRadius: 0.20,
   plateRadius: 1.27,
-  appleX: -0.26,
-  appleZ: -0.15,
-  appleRadius: 0.39,
-  appleHeight: 0.59,
-  spoonX: 0.53,
-  spoonZ: 0.28,
+  appleX: -0.30,
+  appleZ: -0.16,
+  appleRadius: 0.66,
+  appleHeight: 0.96,
+  spoonX: 1.03,
+  spoonZ: 0.33,
 });
 
 export const LEGS = Object.freeze([
@@ -29,6 +31,14 @@ export const LEGS = Object.freeze([
   [-MINI.legOffset,-MINI.legOffset],
   [ MINI.legOffset,-MINI.legOffset],
 ]);
+
+// The spoon bowl stays inside the plate. Its longer handle points diagonally
+// toward the apple and ends exactly on the apple's upper ellipsoid.
+export const SPOON = Object.freeze({
+  start: [0.89, 0.31],
+  end: [0.03, -0.09],
+  halfWidth: 0.092,
+});
 
 const UP = [0, 1, 0];
 const EPS = 1e-9;
@@ -53,6 +63,26 @@ export function plateHeight(x, z) {
   return MINI.seatY + plateRise(Math.hypot(x, z));
 }
 
+export function spoonBridgeInfo(x, z) {
+  const dx = SPOON.end[0] - SPOON.start[0];
+  const dz = SPOON.end[1] - SPOON.start[1];
+  const vx = x - SPOON.start[0];
+  const vz = z - SPOON.start[1];
+  const length2 = dx * dx + dz * dz;
+  const t = (vx * dx + vz * dz) / length2;
+  const lateral = (dx * vz - dz * vx) / Math.sqrt(length2);
+  return { t, lateral, inside: t >= 0 && t <= 1 &&
+    Math.abs(lateral) <= SPOON.halfWidth };
+}
+
+export function appleContact() {
+  const [cx, cy, cz] = appleCenter();
+  const x = SPOON.end[0], z = SPOON.end[1];
+  const q = clamp(1 - ((x - cx) / MINI.appleRadius) ** 2 -
+    ((z - cz) / MINI.appleRadius) ** 2, 0, 1);
+  return [x, cy + MINI.appleHeight * Math.sqrt(q), z];
+}
+
 function spoonRise(x, z) {
   const u = (x - MINI.spoonX) / 0.265;
   const v = (z - MINI.spoonZ) / 0.205;
@@ -60,20 +90,19 @@ function spoonRise(x, z) {
   let bowl = 0;
   if (r < 1) {
     const falloff = 1 - smoothstep((r - 0.79) / 0.21);
-    // Shallow depressed bowl with a softly raised perimeter.
     bowl = (0.018 + 0.068 * Math.exp(-(((r - 0.72) / 0.21) ** 2))) * falloff;
   }
+  const info = spoonBridgeInfo(x, z);
+  if (info.t < 0 || info.t > 1) return bowl;
 
-  let handle = 0;
-  const begin = MINI.spoonX + 0.16;
-  const end = 1.19;
-  if (x > begin && x < end) {
-    const edgeFade = smoothstep((x - begin) / 0.12) *
-      (1 - smoothstep((x - (end - 0.10)) / 0.10));
-    const sideFade = 1 - smoothstep((Math.abs(z - MINI.spoonZ) - 0.055) / 0.055);
-    handle = 0.039 * edgeFade * sideFade;
-  }
-  return Math.max(bowl, handle);
+  const widthFade = 1 - smoothstep(
+    (Math.abs(info.lateral) - SPOON.halfWidth * 0.66) /
+    (SPOON.halfWidth * 0.34),
+  );
+  const ramp = smoothstep(info.t) *
+    smoothstep(info.t / 0.10) *
+    (appleContact()[1] - plateHeight(x, z) + 0.012);
+  return Math.max(bowl, ramp * widthFade);
 }
 
 export function walkingHeight(x, z) {
@@ -105,7 +134,7 @@ function state(surface, p, n, f, leg = null) {
 }
 
 // Spawn presets are an explicit RESET operation. Traversal itself never teleports.
-export function miniatureSpawn(name = 'ground') {
+function localSpawn(name = 'ground') {
   const [cx, cz] = LEGS[0];
   if (name === 'leg') {
     return state('leg', [cx - MINI.legRadius, -0.75, cz], [-1, 0, 0], [0, 1, 0], 0);
@@ -122,10 +151,24 @@ export function miniatureSpawn(name = 'ground') {
     return state('apple', [x, cy + MINI.appleHeight, z], UP, [1, 0, 0]);
   }
   if (name === 'spoon') {
-    const x = 0.87, z = MINI.spoonZ;
+    const x = 0.83, z = 0.28;
     return state('seat', [x, walkingHeight(x, z), z], walkingNormal(x, z), [1, 0, 0]);
   }
   return state('ground', [cx - 0.80, MINI.floorY, cz], UP, [1, 0, 0]);
+}
+
+function toWorld(local) {
+  return { ...local, p: mul(local.p, MINI_SCALE) };
+}
+
+export function miniatureSpawn(name = 'ground') {
+  return toWorld(localSpawn(name));
+}
+
+// Analytic geometry is authored in small model coordinates. Only the external
+// simulation state and renderer live in scaled, absolute world coordinates.
+export function localMiniatureState(world) {
+  return { ...world, p: mul(world.p, 1 / MINI_SCALE) };
 }
 
 // A smooth curved surface cannot be walked through using a world-XZ shortcut.
@@ -133,6 +176,22 @@ export function miniatureSpawn(name = 'ground') {
 // analytic patch after every small step.
 function moveApple(s, direction, step) {
   const center = appleCenter();
+  const contact = appleContact();
+  const dx = SPOON.start[0] - SPOON.end[0];
+  const dz = SPOON.start[1] - SPOON.end[1];
+  const toHandle = unit([dx, 0, dz]);
+  const nearLanding = length(sub(s.p, contact)) <= 0.042;
+  const towardHandle = dot(direction, toHandle) > 0.22;
+  if (nearLanding && towardHandle) {
+    // Exit onto the same point of the spoon deck; no jump across the plate.
+    const n = walkingNormal(SPOON.end[0], SPOON.end[1]);
+    const f = unit(tangent(transport(direction, s.n, n), n));
+    s.surface = 'seat';
+    s.p = [...contact];
+    s.n = n;
+    s.f = f;
+    return;
+  }
   const candidate = add(s.p, mul(direction, step));
   const q = unit([
     (candidate[0] - center[0]) / MINI.appleRadius,
@@ -208,9 +267,29 @@ function moveSeat(s, direction, step) {
   }
 
   const ax = MINI.appleX, az = MINI.appleZ, radius = MINI.appleRadius;
+  const bridge = spoonBridgeInfo(x, z);
+  const wasOnBridge = spoonBridgeInfo(px, pz).inside;
+  const onBridge = bridge.inside;
   const wasOutside = Math.hypot(px - ax, pz - az) >= radius - 1e-7;
   const nowInside = Math.hypot(x - ax, z - az) < radius;
-  if (wasOutside && nowInside) {
+  // A walker on the raised spoon stays on its handle as it crosses the
+  // apple's footprint; only the actual handle tip connects to the fruit.
+  if (onBridge && bridge.t > 0.96 && wasOnBridge) {
+    const landing = appleContact();
+    const normal = appleNormal(landing);
+    const nextDir = unit(tangent(transport(direction, s.n, normal), normal));
+    s.surface = 'apple';
+    s.p = landing;
+    s.n = normal;
+    s.f = nextDir;
+    return;
+  }
+  if (!onBridge && !wasOutside && nowInside) {
+    // Do not let a sideways step walk through solid fruit below the bridge.
+    s.f = direction;
+    return;
+  }
+  if (wasOutside && nowInside && !onBridge) {
     // Intersect the exact authored circle, not an arbitrary nearest point.
     const dx = direction[0], dz = direction[2];
     const ox = px - ax, oz = pz - az;
@@ -311,7 +390,7 @@ function moveGround(s, direction, step) {
 }
 
 // Public entry point: advances one camera-independent ant state in world space.
-export function moveMiniature(s, input, distance) {
+function moveMiniatureLocal(s, input, distance) {
   if (s.shape !== 'miniature' || !Number.isFinite(distance) || distance <= 0) return s;
   let d = unit(tangent(input, s.n));
   if (length(d) < EPS) return s;
@@ -330,4 +409,17 @@ export function moveMiniature(s, input, distance) {
   s.n = unit(s.n);
   s.f = unit(tangent(s.f, s.n));
   return s;
+}
+
+
+export function moveMiniature(world, input, distance) {
+  if (world.shape !== 'miniature' || !Number.isFinite(distance) || distance <= 0) return world;
+  const local = localMiniatureState(world);
+  moveMiniatureLocal(local, input, distance / MINI_SCALE);
+  world.surface = local.surface;
+  world.leg = local.leg;
+  world.p = mul(local.p, MINI_SCALE);
+  world.n = local.n;
+  world.f = local.f;
+  return world;
 }
