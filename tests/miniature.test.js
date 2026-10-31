@@ -175,7 +175,10 @@ test('ground to stool leg is still a real geometric contact', () => {
 test('stool leg climbs to wooden seat and cannot jump into plate side', () => {
   const s = miniatureSpawn('ground');
   move(s, [1, 0, 0], 0.80);
-  for (let i = 0; i < 260 && s.surface === 'leg'; i += 1) {
+  // The new correct route is leg -> vertical seat side -> upper seat.
+  // Continue through the side instead of stopping the legacy test at its
+  // first successful transition away from the cylindrical leg.
+  for (let i = 0; i < 260 && s.surface !== 'seat'; i += 1) {
     move(s, s.f, 0.012);
   }
   assert.equal(s.surface, 'seat');
