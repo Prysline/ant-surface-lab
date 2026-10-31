@@ -6,6 +6,8 @@ import {
   SurfaceCamera, makeMonitor, updateMonitorAspect, cameraDifferenceDegrees,
 } from './cameras.js';
 import { calculateViewRect } from './viewports.js';
+import { MINI, miniatureSpawn, moveMiniature } from './miniature.js';
+import { createMiniatureScene } from './miniatureScene.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -37,6 +39,7 @@ scene.add(coolLight);
 
 const geometryGroup = new THREE.Group();
 scene.add(geometryGroup);
+let miniaturePresentation = null;
 const debugGroup = new THREE.Group();
 debugGroup.layers.set(1);
 scene.add(debugGroup);
@@ -209,11 +212,16 @@ function cubeDecoration() {
   }
 }
 function createShape(shape) {
+  miniaturePresentation = null;
   for (const child of [...geometryGroup.children]) {
     geometryGroup.remove(child);
     child.geometry?.dispose?.();
     if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
     else child.material?.dispose?.();
+  }
+  if (shape === 'miniature') {
+    miniaturePresentation = createMiniatureScene(geometryGroup);
+    return;
   }
   let mesh;
   if (shape === 'sphere') {
@@ -259,7 +267,7 @@ function addTrace() {
 }
 
 function reset(shape = $('shape').value) {
-  ant = initialAnt(shape);
+  ant = shape === 'miniature' ? miniatureSpawn($('mini-start').value) : initialAnt(shape);
   demo = false;
   demoIndex = 0;
   demoTime = 0;
@@ -268,6 +276,13 @@ function reset(shape = $('shape').value) {
   tracePoints = [];
   createShape(shape);
   updateTrail();
+  const miniature = shape === 'miniature';
+  $('miniature-start-control').hidden = !miniature;
+  cameraA.distance = miniature ? 4.7 : 5.65;
+  cameraB.distance = miniature ? 4.7 : 5.65;
+  for (const monitor of Object.values(monitors)) {
+    monitor.userData.halfHeight = miniature ? 3.7 : 2.65;
+  }
   cameraA.reset(ant);
   cameraB.reset(ant);
   $('status').textContent = '準備就緒';
@@ -298,6 +313,11 @@ function movementAxes() {
   return magnitude > 1 ? [x / magnitude, y / magnitude] : [x, y];
 }
 
+function advanceAnt(direction, distance) {
+  if (ant.shape === 'miniature') moveMiniature(ant, direction, distance);
+  else moveOnSurface(ant, direction, distance);
+}
+
 function tick() {
   if (demo) {
     const segment = tour[demoIndex];
@@ -310,7 +330,7 @@ function tick() {
       ant.f = turnAroundNormal(ant.f, ant.n, segment.turn);
       segmentStarted = true;
     }
-    moveOnSurface(ant, ant.f, speed * fixedDt);
+    advanceAnt(ant.f, speed * fixedDt);
     addTrace();
     demoTime += fixedDt;
     if (demoTime >= segment.duration) {
@@ -323,7 +343,7 @@ function tick() {
     if (Math.hypot(x, y) > 0.035) {
       const camera = activeCamera === 'A' ? cameraA : cameraB;
       const direction = camera.direction(x, y);
-      moveOnSurface(ant, direction, speed * fixedDt);
+      advanceAnt(direction, speed * fixedDt);
       addTrace();
     }
   }
@@ -332,6 +352,7 @@ function tick() {
 }
 
 function updateVisuals() {
+  miniaturePresentation?.updateVisibility(ant);
   const normal = new THREE.Vector3(...ant.n);
   const heading = new THREE.Vector3(...ant.f).normalize();
   const localZ = heading.clone().negate();
@@ -399,6 +420,7 @@ function telemetry() {
   $('heading').textContent = format(ant.f);
   $('angle').textContent = cameraDifferenceDegrees(cameraA, cameraB).toFixed(1) + '°';
   $('motion').textContent = demo ? '預設路徑' : (paused ? '暫停' : '手動控制');
+  $('surface').textContent = ant.shape === 'miniature' ? ({ ground: '展示台地面', leg: '凳腳', seat: '凳面／餐盤／湯匙', apple: '蘋果表面' }[ant.surface] || '未知') : ant.shape;
 }
 
 function setActive(mode) {
@@ -414,7 +436,11 @@ function setActive(mode) {
 }
 $('control-a').addEventListener('click', () => setActive('A'));
 $('control-b').addEventListener('click', () => setActive('B'));
-$('shape').addEventListener('change', (event) => reset(event.target.value));
+$('shape').addEventListener('change', (event) => {
+  $('mini-start').value = 'ground';
+  reset(event.target.value);
+});
+$('mini-start').addEventListener('change', () => reset('miniature'));
 $('reset').addEventListener('click', () => reset());
 $('demo').addEventListener('click', startDemo);
 $('replay').addEventListener('click', startDemo);
