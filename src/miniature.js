@@ -26,6 +26,12 @@ export {
 } from './miniatureGeometry.js';
 
 const UP = [0, 1, 0];
+export const STOOL_SIDE_BOTTOM = MINI.seatY - 0.18;
+export const APPLE_SPOON_GUIDE = Object.freeze({
+  maxContactDistance: 0.18,
+  endDistance: 0.012,
+  minApproachDot: 0.05,
+});
 const EPS = 1e-8;
 
 function state(surface, p, n, f, details = {}) {
@@ -52,6 +58,11 @@ function localSpawn(name = 'ground') {
   if (name === 'leg') {
     return state('leg', [cx - MINI.legRadius, -0.75, cz],
       [-1, 0, 0], [0, 1, 0], { leg: 0 });
+  }
+  if (name === 'side') {
+    return state('seatSide',
+      [-MINI.seatHalf, (STOOL_SIDE_BOTTOM + MINI.seatY) / 2, 0.85],
+      [-1, 0, 0], [0, 1, 0], { sideAxis: 0, sideSign: -1 });
   }
   if (name === 'stool') {
     return state('seat', [-1.10, MINI.seatY, 0.56], UP, [1, 0, 0]);
@@ -210,23 +221,109 @@ function nearestLegAtSeat(x, z) {
   return distance <= 0.39 ? best : -1;
 }
 
+// A stool top is a 3-D slab, not only its upward-facing plane. Each of its
+// four vertical faces is a distinct navigable patch. The sides meet the top
+// along real edges and meet supporting legs at the underside near corners.
+function sideNormal(axis, sign) {
+  const n = [0, 0, 0];
+  n[axis] = sign;
+  return n;
+}
+function attachSide(s, axis, sign, point, direction) {
+  const n = sideNormal(axis, sign);
+  const onSide = [...point];
+  onSide[axis] = sign * MINI.seatHalf;
+  onSide[1] = clamp(onSide[1], STOOL_SIDE_BOTTOM, MINI.seatY);
+  setPosition(s, onSide, n, direction);
+  s.surface = 'seatSide';
+  s.sideAxis = axis;
+  s.sideSign = sign;
+  s.leg = null;
+  delete s.q;
+  delete s.theta;
+}
+
+function legNearSide(point, sideAxis, sign) {
+  const other = sideAxis === 0 ? 2 : 0;
+  for (let i = 0; i < LEGS.length; i += 1) {
+    const [cx, cz] = LEGS[i];
+    const center = [cx, 0, cz];
+    if (Math.sign(center[sideAxis]) !== sign) continue;
+    if (Math.abs(point[other] - center[other]) > MINI.legRadius * 0.9) continue;
+    const r = Math.hypot(point[0] - cx, point[2] - cz);
+    if (Math.abs(r - MINI.legRadius) <= 0.09) return i;
+  }
+  return -1;
+}
+
+function stepSeatSide(s, direction, step) {
+  const axis = s.sideAxis, sign = s.sideSign;
+  const other = axis === 0 ? 2 : 0;
+  const candidate = add(s.p, mul(direction, step));
+  candidate[axis] = sign * MINI.seatHalf;
+  if (candidate[1] >= MINI.seatY && direction[1] > 0) {
+    const edge = [...candidate];
+    edge[1] = MINI.seatY;
+    edge[other] = clamp(edge[other], -MINI.seatHalf, MINI.seatHalf);
+    setPosition(s, edge, UP, direction);
+    s.surface = 'seat';
+    delete s.sideAxis;
+    delete s.sideSign;
+    return;
+  }
+  if (candidate[1] <= STOOL_SIDE_BOTTOM && direction[1] < 0) {
+    const edge = [...candidate];
+    edge[1] = STOOL_SIDE_BOTTOM;
+    edge[other] = clamp(edge[other], -MINI.seatHalf, MINI.seatHalf);
+    const i = legNearSide(edge, axis, sign);
+    if (i >= 0) {
+      const [cx, cz] = LEGS[i];
+      const radial = unit([edge[0] - cx, 0, edge[2] - cz]);
+      setPosition(s, [cx + radial[0] * MINI.legRadius,
+        STOOL_SIDE_BOTTOM, cz + radial[2] * MINI.legRadius], radial, direction);
+      s.surface = 'leg';
+      s.leg = i;
+      delete s.sideAxis;
+      delete s.sideSign;
+      return;
+    }
+    // The underside is not yet an authored walkable patch. Do not move
+    // through empty space at the lower edge.
+    s.p = edge;
+    s.f = unit(tangent(direction, s.n));
+    return;
+  }
+  if (Math.abs(candidate[other]) > MINI.seatHalf) {
+    const nextSign = Math.sign(candidate[other]);
+    candidate[other] = nextSign * MINI.seatHalf;
+    candidate[1] = clamp(candidate[1], STOOL_SIDE_BOTTOM, MINI.seatY);
+    attachSide(s, other, nextSign, candidate, direction);
+    return;
+  }
+  setPosition(s, candidate, s.n, direction);
+}
+
 function stepSeat(s, direction, step) {
   const next = add(s.p, mul(direction, step));
   const px = s.p[0], pz = s.p[2], x = next[0], z = next[2];
   if (Math.abs(x) > MINI.seatHalf || Math.abs(z) > MINI.seatHalf) {
-    const edgeX = clamp(x, -MINI.seatHalf, MINI.seatHalf);
-    const edgeZ = clamp(z, -MINI.seatHalf, MINI.seatHalf);
-    const leg = nearestLegAtSeat(edgeX, edgeZ);
-    if (leg >= 0) {
-      const [cx, cz] = LEGS[leg];
-      const radial = unit([edgeX - cx, 0, edgeZ - cz]);
-      s.leg = leg; s.surface = 'leg';
-      setPosition(s, [cx + radial[0] * MINI.legRadius, MINI.seatY,
-        cz + radial[2] * MINI.legRadius], radial, direction);
-      return;
+    // Enter the FIRST actual slab edge that was crossed. Transferring the
+    // tangent vector from up to the outward normal gives DOWN on the side.
+    let first = null;
+    for (const axis of [0, 2]) {
+      if (Math.abs(direction[axis]) < EPS) continue;
+      const sign = Math.sign(direction[axis]);
+      const boundary = sign * MINI.seatHalf;
+      const fraction = (boundary - s.p[axis]) / (direction[axis] * step);
+      if (fraction < -EPS || fraction > 1 + EPS) continue;
+      if (!first || fraction < first.fraction) first = { axis, sign, fraction };
     }
-    s.p = [edgeX, MINI.seatY, edgeZ];
-    s.f = unit(tangent(direction, UP));
+    if (first) {
+      const edge = add(s.p, mul(direction, step * Math.max(0, first.fraction)));
+      edge[first.axis] = first.sign * MINI.seatHalf;
+      edge[1] = MINI.seatY;
+      attachSide(s, first.axis, first.sign, edge, direction);
+    }
     return;
   }
 
@@ -260,6 +357,19 @@ function stepLeg(s, direction, step) {
   const radial = [Math.cos(nextPhi), 0, Math.sin(nextPhi)];
   const point = [cx + radial[0] * MINI.legRadius, y,
     cz + radial[2] * MINI.legRadius];
+  // Near the tabletop underside, a cylindrical leg physically meets the
+  // vertical side. Link that contact before the old direct top transition.
+  if (y >= STOOL_SIDE_BOTTOM && s.p[1] < STOOL_SIDE_BOTTOM) {
+    const nearX = Math.abs(Math.abs(point[0]) - MINI.seatHalf);
+    const nearZ = Math.abs(Math.abs(point[2]) - MINI.seatHalf);
+    const axis = nearX <= nearZ ? 0 : 2;
+    if (Math.min(nearX, nearZ) <= 0.05) {
+      const edge = [...point];
+      edge[1] = STOOL_SIDE_BOTTOM;
+      attachSide(s, axis, Math.sign(edge[axis]), edge, direction);
+      return;
+    }
+  }
   if (y > MINI.seatY) {
     const x = clamp(point[0], -MINI.seatHalf, MINI.seatHalf);
     const z = clamp(point[2], -MINI.seatHalf, MINI.seatHalf);
@@ -316,6 +426,7 @@ export function moveMiniature(world, input, distance) {
     const step = Math.min(0.008, remaining);
     if (local.surface === 'ground') stepGround(local, direction, step);
     else if (local.surface === 'seat') stepSeat(local, direction, step);
+    else if (local.surface === 'seatSide') stepSeatSide(local, direction, step);
     else if (local.surface === 'leg') stepLeg(local, direction, step);
     else if (local.surface === 'plate' || local.surface === 'apple') {
       stepProfile(local, direction, step);
