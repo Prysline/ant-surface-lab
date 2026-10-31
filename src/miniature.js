@@ -61,7 +61,7 @@ function spoonRise(x, z) {
   if (r < 1) {
     const falloff = 1 - smoothstep((r - 0.79) / 0.21);
     // Shallow depressed bowl with a softly raised perimeter.
-    bowl = (0.018 + 0.068 * Math.exp(-((r - 0.72) / 0.21) ** 2)) * falloff;
+    bowl = (0.018 + 0.068 * Math.exp(-(((r - 0.72) / 0.21) ** 2))) * falloff;
   }
 
   let handle = 0;
@@ -111,7 +111,7 @@ export function miniatureSpawn(name = 'ground') {
     return state('leg', [cx - MINI.legRadius, -0.75, cz], [-1, 0, 0], [0, 1, 0], 0);
   }
   if (name === 'stool') {
-    return state('seat', [-1.10, MINI.seatY, 0.56], UP, [1, 0, 0]);
+    return state('seat', [-1.10, walkingHeight(-1.10, 0.56), 0.56], walkingNormal(-1.10, 0.56), [1, 0, 0]);
   }
   if (name === 'plate') {
     const x = 0.02, z = -0.72;
