@@ -6,7 +6,7 @@ import {
   SurfaceCamera, makeMonitor, updateMonitorAspect, cameraDifferenceDegrees,
 } from './cameras.js';
 import { calculateViewRect } from './viewports.js';
-import { MINI, miniatureSpawn, moveMiniature } from './miniature.js';
+import { MINI, MINI_SCALE, miniatureSpawn, moveMiniature } from './miniature.js';
 import { createMiniatureScene } from './miniatureScene.js';
 import './style.css';
 
@@ -213,6 +213,18 @@ function cubeDecoration() {
 }
 function createShape(shape) {
   miniaturePresentation = null;
+  const isMiniature = shape === 'miniature';
+  geometryGroup.scale.setScalar(isMiniature ? MINI_SCALE : 1);
+  grid.visible = !isMiniature;
+  axes.scale.setScalar(isMiniature ? MINI_SCALE : 1);
+  for (const [name, monitor] of Object.entries(monitors)) {
+    const factor = isMiniature ? MINI_SCALE : 1;
+    if (name === 'top') monitor.position.set(0, 9 * factor, 0);
+    else if (name === 'front') monitor.position.set(0, 0, 9 * factor);
+    else monitor.position.set(9 * factor, 0, 0);
+    monitor.lookAt(0, 0, 0);
+    monitor.updateMatrixWorld();
+  }
   for (const child of [...geometryGroup.children]) {
     geometryGroup.remove(child);
     child.geometry?.dispose?.();
@@ -281,7 +293,7 @@ function reset(shape = $('shape').value) {
   cameraA.distance = miniature ? 4.7 : 5.65;
   cameraB.distance = miniature ? 4.7 : 5.65;
   for (const monitor of Object.values(monitors)) {
-    monitor.userData.halfHeight = miniature ? 3.7 : 2.65;
+    monitor.userData.halfHeight = miniature ? 3.7 * MINI_SCALE : 2.65;
   }
   cameraA.reset(ant);
   cameraB.reset(ant);
@@ -314,7 +326,7 @@ function movementAxes() {
 }
 
 function advanceAnt(direction, distance) {
-  if (ant.shape === 'miniature') moveMiniature(ant, direction, distance);
+  if (ant.shape === 'miniature') moveMiniature(ant, direction, distance * MINI_SCALE);
   else moveOnSurface(ant, direction, distance);
 }
 
