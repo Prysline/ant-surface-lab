@@ -185,10 +185,12 @@ function createSpoon(group, silver, metalEdge) {
   new THREE.MeshStandardMaterial({ color: 0xe7f0f0, metalness: 0.68, roughness: 0.2 }));
 }
 
-function addMarker(parent, point, color) {
+function addMarker(parent, point, color, inPlayerCameras = false) {
   const mesh = attach(parent, new THREE.SphereGeometry(0.033, 9, 7),
     new THREE.MeshBasicMaterial({ color }), ...point);
   mesh.layers.set(1);
+  if (inPlayerCameras) mesh.layers.enable(0);
+  mesh.userData.noAntOcclusion = true;
 }
 
 export function createMiniatureScene(group) {
@@ -252,25 +254,12 @@ export function createMiniatureScene(group) {
   const neck = SPOON.start;
   addMarker(group, [neck[0], walkingHeight(...neck) + 0.05, neck[1]], 0x89cefa);
   const touch = appleContact();
-  addMarker(group, [touch[0], touch[1] + 0.025, touch[2]], 0x9de2fa);
+  addMarker(group, [touch[0], touch[1] + 0.025, touch[2]], 0x9de2fa, true);
 
-  const faded = [wood, ceramic, underside, red, silver, metalEdge];
-  let lastFade = null;
+  // Occlusion is evaluated separately for each camera while rendering.
   return {
-    updateVisibility(ant) {
-      const shouldFade = ant.shape === 'miniature' &&
-        (ant.surface === 'ground' ||
-        (ant.surface === 'leg' && ant.p[1] < -0.15 * MINI_SCALE));
-      if (shouldFade === lastFade) return;
-      lastFade = shouldFade;
-      for (const m of faded) {
-        m.transparent = shouldFade;
-        m.opacity = shouldFade ? 0.28 : 1;
-        m.depthWrite = !shouldFade;
-        m.needsUpdate = true;
-      }
-    },
-    clear() { lastFade = null; },
+    updateVisibility() {},
+    clear() {},
     seatMesh, plateMesh, underMesh, appleMesh,
   };
 }
