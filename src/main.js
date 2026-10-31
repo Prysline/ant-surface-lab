@@ -432,7 +432,7 @@ function telemetry() {
   $('heading').textContent = format(ant.f);
   $('angle').textContent = cameraDifferenceDegrees(cameraA, cameraB).toFixed(1) + '°';
   $('motion').textContent = demo ? '預設路徑' : (paused ? '暫停' : '手動控制');
-  $('surface').textContent = ant.shape === 'miniature' ? ({ ground: '展示台地面', leg: '凳腳', seat: '凳面／餐盤／湯匙', apple: '蘋果表面' }[ant.surface] || '未知') : ant.shape;
+  $('surface').textContent = ant.shape === 'miniature' ? ({ ground: '展示台地面', leg: '凳腳', seat: '木凳面', plate: '餐盤（上面／盤緣／盤底／圈足）／湯匙', apple: '蘋果表面' }[ant.surface] || '未知') : ant.shape;
 }
 
 function setActive(mode) {
