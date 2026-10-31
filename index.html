@@ -87,7 +87,8 @@
             <select id="mini-start">
               <option value="ground">P0 · 展示台地面</option>
               <option value="leg">P1 · 凳腳中段</option>
-              <option value="stool">P2 · 凳面</option>
+              <option value="stool">P2 · 凳面上方</option>
+              <option value="side">P6 · 凳面側壁</option>
               <option value="plate">P3 · 盤內</option>
               <option value="apple">P4 · 蘋果頂部</option>
               <option value="spoon">P5 · 湯匙柄</option>
@@ -139,6 +140,7 @@
             <div class="readout"><span>所在表面</span><output id="surface">—</output></div>
           </div>
           <label class="checkline"><input type="checkbox" id="trail" checked />顯示行走軌跡</label>
+          <label class="checkline"><input type="checkbox" id="occlusion" checked />遮擋螞蟻的物件自動半透明</label>
           <label class="field-label" for="transition">跨面鏡頭過渡</label>
           <select id="transition">
             <option value="0">立即切換（比較用）</option>
