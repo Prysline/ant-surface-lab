@@ -1,201 +1,247 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dot, length, sub } from '../src/core.js';
+import { dot, length, sub, unit } from '../src/core.js';
 import {
   MINI, MINI_SCALE, LEGS, SPOON,
   plateHeight, walkingHeight, miniatureSpawn, moveMiniature,
   appleCenter, appleContact, spoonBridgeInfo, localMiniatureState,
 } from '../src/miniature.js';
+import {
+  PLATE_PROFILE, PLATE_METRICS, APPLE_PROFILE, APPLE_METRICS,
+  PLATE_FOOT_CONTACT, PLATE_FOOT_INNER, PLATE_FOOT_OUTER,
+  PLATE_TOP_END, applePoint, platePoint, plateQForRadius,
+  surfacePoint, surfaceNormal, spoonBowlInfo, APPLE_FOOT_RADIUS,
+} from '../src/miniatureGeometry.js';
 
-const near = (actual, expected, tol = 0.035) =>
-  assert.ok(Math.abs(actual - expected) < tol,
-    actual + ' should be near ' + expected);
-const local = (s) => localMiniatureState(s);
-const move = (s, direction, distanceInModelUnits) =>
-  moveMiniature(s, direction, distanceInModelUnits * MINI_SCALE);
-const valid = (state) => {
-  assert.ok(['ground', 'leg', 'seat', 'apple'].includes(state.surface), state.surface);
-  assert.ok(state.p.every(Number.isFinite));
-  near(length(state.n), 1, 1e-5);
-  near(length(state.f), 1, 1e-5);
-  near(dot(state.n, state.f), 0, 1e-5);
-};
+const near = (a, b, tol = 0.035) =>
+  assert.ok(Math.abs(a - b) < tol, a + ' should be near ' + b);
+const local = localMiniatureState;
+const move = (s, direction, distance) =>
+  moveMiniature(s, direction, distance * MINI_SCALE);
 
-test('miniature is four times larger in world coordinates without scaling the ant', () => {
+function valid(s) {
+  assert.ok(['ground', 'leg', 'seat', 'plate', 'apple'].includes(s.surface), s.surface);
+  assert.ok(s.p.every(Number.isFinite), 'finite world coordinates');
+  near(length(s.n), 1, 1e-5);
+  near(length(s.f), 1, 1e-5);
+  near(dot(s.n, s.f), 0, 1e-5);
+  if (s.surface === 'plate' || s.surface === 'apple') {
+    const p = surfacePoint(s.surface, s.q, s.theta).map((v) => v * MINI_SCALE);
+    near(length(sub(s.p, p)), 0, 2e-5);
+  }
+}
+
+test('scale remains 4x, no implicit rescaling of the ant', () => {
   assert.equal(MINI_SCALE, 4);
-  const ground = miniatureSpawn('ground');
-  near(ground.p[1], MINI.floorY * 4, 1e-5);
-  const plate = miniatureSpawn('plate');
-  near(plate.p[1], walkingHeight(plate.p[0] / 4, plate.p[2] / 4) * 4, 1e-5);
+  near(miniatureSpawn('ground').p[1], MINI.floorY * MINI_SCALE, 1e-6);
 });
 
-test('all six test spawns have a world-space position and a real authored surface', () => {
-  for (const preset of ['ground', 'leg', 'stool', 'plate', 'apple', 'spoon']) {
-    const s = miniatureSpawn(preset);
-    valid(s);
+test('all six reset presets are attached to named authored surfaces', () => {
+  const expected = {
+    ground: 'ground', leg: 'leg', stool: 'seat', plate: 'plate',
+    apple: 'apple', spoon: 'plate',
+  };
+  for (const [name, surface] of Object.entries(expected)) {
+    const s = miniatureSpawn(name);
     assert.equal(s.shape, 'miniature');
-    const p = local(s).p;
-    if (s.surface === 'seat') near(p[1], walkingHeight(p[0], p[2]), 1e-5);
-    if (s.surface === 'ground') near(p[1], MINI.floorY, 1e-5);
+    assert.equal(s.surface, surface);
+    valid(s);
   }
 });
 
-test('ground surface intersects a stool leg, then climbs without teleporting', () => {
+test('the plate ONLY touches the stool at its narrow annular foot', () => {
+  const touched = PLATE_PROFILE.filter((p) => Math.abs(p[1]) < 1e-8);
+  assert.equal(touched.length, 2);
+  near(touched[0][0], PLATE_FOOT_OUTER, 1e-8);
+  near(touched[1][0], PLATE_FOOT_INNER, 1e-8);
+  assert.ok(PLATE_FOOT_OUTER < MINI.plateRadius * 0.45);
+  const raised = PLATE_PROFILE.filter((p) => p[0] > PLATE_FOOT_OUTER + 0.1);
+  assert.ok(raised.every((p) => p[1] > 0.055 - 1e-8),
+    'all other underside/top portions are above wooden stool');
+  for (const theta of [0, Math.PI / 3, Math.PI, 5]) {
+    const top = platePoint(PLATE_METRICS.distances[4], theta);
+    assert.ok(top[1] > MINI.seatY + 0.12);
+    const below = platePoint(PLATE_METRICS.distances[11], theta);
+    assert.ok(below[1] > MINI.seatY + 0.055);
+  }
+  const upperCenter = platePoint(0, 0);
+  const lowerCenter = platePoint(PLATE_METRICS.length, 0);
+  assert.ok(upperCenter[1] > lowerCenter[1] + 0.020);
+});
+
+test('approaching the plate rim on the STOOL cannot teleport onto ceramic', () => {
+  const s = miniatureSpawn('stool');
+  move(s, [1, 0, 0], 0.25);
+  assert.equal(s.surface, 'seat');
+  near(local(s).p[1], MINI.seatY, 1e-6);
+  valid(s);
+});
+
+test('the stool touches the plate foot at the exterior radius only', () => {
+  const s = miniatureSpawn('stool');
+  const start = local(s).p;
+  const towardCenter = unit([-start[0], 0, -start[2]]);
+  for (let i = 0; i < 120 && s.surface === 'seat'; i += 1) {
+    move(s, towardCenter, 0.01);
+  }
+  assert.equal(s.surface, 'plate');
+  assert.ok(s.q <= PLATE_METRICS.distances[PLATE_FOOT_CONTACT]);
+  valid(s);
+});
+
+test('walk from stool through the narrow foot, underside, lip and onto the dish', () => {
+  const s = miniatureSpawn('stool');
+  const initial = local(s).p;
+  const toFoot = unit([-initial[0], 0, -initial[2]]);
+  for (let i = 0; i < 160 && s.surface === 'seat'; i += 1) {
+    move(s, toFoot, 0.01);
+  }
+  assert.equal(s.surface, 'plate');
+  const footQ = s.q;
+  let visitedUnderside = false, visitedRim = false, visitedTop = false;
+  for (let i = 0; i < 540 && s.surface === 'plate'; i += 1) {
+    move(s, s.f, 0.012);
+    valid(s);
+    if (s.q < footQ - 0.12 && s.q > PLATE_METRICS.distances[PLATE_TOP_END] + 0.12) {
+      visitedUnderside = true;
+    }
+    if (s.q < PLATE_METRICS.distances[PLATE_TOP_END] + 0.04) visitedRim = true;
+    if (s.q < PLATE_METRICS.distances[PLATE_TOP_END] - 0.12) {
+      visitedTop = true;
+      break;
+    }
+  }
+  assert.ok(visitedUnderside, 'walker must traverse underside');
+  assert.ok(visitedRim, 'walker must roll over ceramic lip');
+  assert.ok(visitedTop, 'walker must reach inner top');
+});
+
+test('ground to stool leg is still a real geometric contact', () => {
   const s = miniatureSpawn('ground');
-  const previous = [...s.p];
   move(s, [1, 0, 0], 0.80);
   assert.equal(s.surface, 'leg');
-  assert.equal(s.leg, 0);
   const p = local(s).p;
   near(Math.hypot(p[0] - LEGS[0][0], p[2] - LEGS[0][1]),
     MINI.legRadius, 1e-5);
   assert.ok(p[1] > MINI.floorY);
-  assert.ok(length(sub(s.p, previous)) < MINI_SCALE);
   valid(s);
 });
 
-test('leg can reach enlarged stool tabletop without leaving its connected surface', () => {
+test('stool leg climbs to wooden seat and cannot jump into plate side', () => {
   const s = miniatureSpawn('ground');
   move(s, [1, 0, 0], 0.80);
-  let sawSeat = false;
-  for (let i = 0; i < 250; i += 1) {
+  for (let i = 0; i < 260 && s.surface === 'leg'; i += 1) {
     move(s, s.f, 0.012);
-    valid(s);
-    if (s.surface === 'seat') { sawSeat = true; break; }
-  }
-  assert.equal(sawSeat, true);
-  const p = local(s).p;
-  near(p[1], walkingHeight(p[0], p[2]), 1e-5);
-  assert.ok(Math.abs(p[0]) <= MINI.seatHalf + 1e-5);
-  assert.ok(Math.abs(p[2]) <= MINI.seatHalf + 1e-5);
-});
-
-test('ceramic plate has a higher rim and lower interior', () => {
-  near(plateHeight(1.27, 0), MINI.seatY, 1e-5);
-  assert.ok(plateHeight(0.98, 0) > plateHeight(0, 0) + 0.16);
-  const s = miniatureSpawn('stool');
-  move(s, [1, 0, 0], 0.44);
-  assert.equal(s.surface, 'seat');
-  const p = local(s).p;
-  near(p[1], walkingHeight(p[0], p[2]), 1e-5);
-  valid(s);
-});
-
-test('apple is visually and physically larger than the previous test apple', () => {
-  assert.ok(MINI.appleRadius > 0.39 * 1.6);
-  assert.ok(MINI.appleHeight > 0.59 * 1.6);
-  const [x, cy, z] = appleCenter();
-  const top = miniatureSpawn('apple');
-  near(top.p[0], x * MINI_SCALE, 1e-5);
-  near(top.p[2], z * MINI_SCALE, 1e-5);
-  near(top.p[1], (cy + MINI.appleHeight) * MINI_SCALE, 1e-5);
-});
-
-test('plate contact ring remains navigable for larger apple', () => {
-  const s = miniatureSpawn('plate');
-  const goal = appleCenter();
-  const p = local(s).p;
-  const direction = [goal[0] - p[0], 0, goal[2] - p[2]];
-  move(s, direction, 0.43);
-  assert.equal(s.surface, 'apple');
-  const current = local(s).p;
-  const q = [
-    (current[0] - goal[0]) / MINI.appleRadius,
-    (current[1] - goal[1]) / MINI.appleHeight,
-    (current[2] - goal[2]) / MINI.appleRadius,
-  ];
-  near(length(q), 1, 1e-5);
-  valid(s);
-});
-
-test('apple surface remains attached until it crosses the equator', () => {
-  const s = miniatureSpawn('apple');
-  for (let i = 0; i < 170; i += 1) {
-    move(s, s.f, 0.012);
-    valid(s);
-    if (s.surface === 'seat') break;
-    assert.ok(local(s).p[1] >= appleCenter()[1] - 1e-6);
   }
   assert.equal(s.surface, 'seat');
-});
-
-test('spoon bridge reaches an actual point on the apple upper hemisphere', () => {
-  const contact = appleContact();
-  const center = appleCenter();
-  const normalized = [
-    (contact[0] - center[0]) / MINI.appleRadius,
-    (contact[1] - center[1]) / MINI.appleHeight,
-    (contact[2] - center[2]) / MINI.appleRadius,
-  ];
-  near(length(normalized), 1, 1e-6);
-  near(walkingHeight(...SPOON.end), contact[1] + 0.012, 0.015);
-  assert.ok(Math.hypot(
-    SPOON.end[0] - SPOON.start[0], SPOON.end[1] - SPOON.start[1],
-  ) > 0.9);
-});
-
-test('spoon stem and bowl have a visible raised heightfield', () => {
-  const s = miniatureSpawn('spoon');
-  const p = local(s).p;
-  assert.ok(walkingHeight(p[0], p[2]) >= plateHeight(p[0], p[2]) + 0.01);
-  move(s, [1, 0, 0], 0.09);
-  assert.equal(s.surface, 'seat');
-  const next = local(s).p;
-  near(next[1], walkingHeight(next[0], next[2]), 1e-5);
+  near(local(s).p[1], MINI.seatY, 1e-5);
   valid(s);
 });
 
-test('spoon surface crosses apple footprint only along a narrow raised corridor', () => {
-  const s = miniatureSpawn('spoon');
-  // Select a midpoint along the bridge explicitly as a reset position for
-  // testing the geometric seam, then continue with ordinary movement.
-  const t = 0.88;
-  const x = SPOON.start[0] * (1 - t) + SPOON.end[0] * t;
-  const z = SPOON.start[1] * (1 - t) + SPOON.end[1] * t;
-  assert.ok(spoonBridgeInfo(x, z).inside);
-  s.p = [x * MINI_SCALE, walkingHeight(x, z) * MINI_SCALE, z * MINI_SCALE];
-  s.n = [0, 1, 0];
-  s.f = [SPOON.end[0] - SPOON.start[0], 0, SPOON.end[1] - SPOON.start[1]];
-  const direction = s.f;
-  move(s, direction, 0.21);
-  assert.equal(s.surface, 'apple', 'spoon tip should connect to the fruit');
-  valid(s);
+test('the new apple skin NEVER extends below ceramic or intersects stool', () => {
+  assert.ok(APPLE_PROFILE[0][0] < APPLE_PROFILE[4][0]);
+  assert.ok(APPLE_PROFILE[4][0] < MINI.plateRadius);
+  for (let i = 0; i <= 80; i += 1) {
+    for (let j = 0; j < 24; j += 1) {
+      const q = APPLE_METRICS.length * i / 80;
+      const theta = Math.PI * 2 * j / 24;
+      const [x, y, z] = applePoint(q, theta);
+      assert.ok(y + 1e-8 >= plateHeight(x, z),
+        'fruit skin always above ceramic top');
+      assert.ok(Math.hypot(x, z) < MINI.plateRadius,
+        'fruit remains inside plate lip');
+    }
+  }
+  const crown = applePoint(APPLE_METRICS.length, 0);
+  const shoulder = applePoint(APPLE_METRICS.distances[9], 0);
+  assert.ok(crown[1] < shoulder[1], 'fruit crown has top depression');
+  const support = applePoint(0, 2.14);
+  near(support[1], plateHeight(support[0], support[2]), 1e-7);
 });
 
-test('apple can step back onto the spoon through the authored contact', () => {
+test('fruit and ceramic meet at a small foot ring, not the full apple belly', () => {
+  assert.ok(APPLE_FOOT_RADIUS < APPLE_PROFILE[4][0] * 0.55);
   const s = miniatureSpawn('apple');
-  const contact = appleContact();
+  valid(s);
   const center = appleCenter();
-  const normal = [
-    (contact[0] - center[0]) / (MINI.appleRadius ** 2),
-    (contact[1] - center[1]) / (MINI.appleHeight ** 2),
-    (contact[2] - center[2]) / (MINI.appleRadius ** 2),
-  ];
-  const magnitude = length(normal);
-  s.p = contact.map((v) => v * MINI_SCALE);
-  s.n = normal.map((v) => v / magnitude);
-  const towardHandle = [
+  const crown = local(s).p;
+  assert.ok(crown[1] > center[1] + 0.7);
+});
+
+test('the metal spoon has an oval hollow bowl and a long raised handle', () => {
+  const center = spoonBowlInfo(...SPOON.bowl);
+  near(center.radius, 0, 1e-7);
+  const lip = spoonBowlInfo(SPOON.bowl[0] + 0.15, SPOON.bowl[1]);
+  assert.ok(lip.radius > center.radius);
+  const distance = Math.hypot(
+    SPOON.end[0] - SPOON.start[0], SPOON.end[1] - SPOON.start[1]);
+  assert.ok(distance > 0.5);
+  const contact = appleContact();
+  near(contact[0], SPOON.end[0], 1e-8);
+  near(contact[2], SPOON.end[1], 1e-8);
+  near(walkingHeight(...SPOON.end), contact[1], 1e-5);
+});
+
+test('walking surface on the spoon neck matches authored ceramic+metal height', () => {
+  const s = miniatureSpawn('spoon');
+  assert.equal(s.surface, 'plate');
+  const p = local(s).p;
+  near(p[1], walkingHeight(p[0], p[2]), 1e-5);
+  move(s, s.f, 0.012);
+  valid(s);
+});
+
+test('walk continuously along the spoon handle onto the apple shoulder', () => {
+  const s = miniatureSpawn('spoon');
+  const direction = unit([
+    SPOON.end[0] - SPOON.start[0], 0,
+    SPOON.end[1] - SPOON.start[1],
+  ]);
+  let transitioned = false;
+  for (let i = 0; i < 130; i += 1) {
+    move(s, direction, 0.012);
+    valid(s);
+    if (s.surface === 'apple') { transitioned = true; break; }
+  }
+  assert.equal(transitioned, true, 'spoon-to-apple must be traversable without a reset');
+});
+
+test('fruit contact can connect to the tip of the raised spoon', () => {
+  const s = miniatureSpawn('apple');
+  const contactQ = APPLE_METRICS.distances[4];
+  s.q = contactQ;
+  s.theta = 0;
+  s.p = appleContact().map((v) => v * MINI_SCALE);
+  s.n = surfaceNormal('apple', contactQ, 0);
+  const d = unit([
     SPOON.start[0] - SPOON.end[0], 0,
     SPOON.start[1] - SPOON.end[1],
-  ];
-  move(s, towardHandle, 0.03);
-  assert.equal(s.surface, 'seat');
-  valid(s);
-  const p = local(s).p;
-  near(p[1], walkingHeight(p[0], p[2]), 0.015);
-});
-
-test('stool rim without supporting leg does not invent a bridge into empty space', () => {
-  const s = miniatureSpawn('stool');
-  move(s, [-1, 0, 0], 1.4);
-  assert.equal(s.surface, 'seat');
-  near(local(s).p[0], -MINI.seatHalf, 1e-5);
+  ]);
+  s.f = unit(sub(d, s.n.map((n) => dot(d, s.n) * n)));
+  move(s, d, 0.012);
+  assert.equal(s.surface, 'plate');
   valid(s);
 });
 
-test('reset spawns are independent and camera selection cannot mutate state', () => {
-  const a = miniatureSpawn('ground');
-  const b = miniatureSpawn('ground');
-  a.p[0] += 0.5;
+test('apple base can return to plate top without crossing ceramic', () => {
+  const s = miniatureSpawn('apple');
+  s.q = 0.01;
+  s.theta = Math.PI;
+  s.p = applePoint(s.q, s.theta).map((v) => v * MINI_SCALE);
+  s.n = surfaceNormal('apple', s.q, s.theta);
+  const towardsFoot = sub(applePoint(0, s.theta), local(s).p);
+  s.f = unit(sub(towardsFoot,
+    s.n.map((n) => dot(towardsFoot, s.n) * n)));
+  for (let i = 0; i < 50 && s.surface === 'apple'; i += 1) {
+    move(s, s.f, 0.01);
+  }
+  assert.equal(s.surface, 'plate');
+  valid(s);
+});
+
+test('independent spawn states cannot mutate each other', () => {
+  const a = miniatureSpawn('stool');
+  const b = miniatureSpawn('stool');
+  a.p[0] += 99;
   assert.notEqual(a.p[0], b.p[0]);
 });
