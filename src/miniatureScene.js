@@ -3,7 +3,7 @@
 // of truth). Geometry must follow that file; changing only the mesh is a bug.
 import * as THREE from 'three';
 import {
-  MINI, LEGS, plateHeight, walkingHeight, appleCenter,
+  MINI, LEGS, SPOON, MINI_SCALE, plateHeight, walkingHeight, appleCenter,
 } from './miniature.js';
 
 function material(color, roughness = 0.73, metalness = 0.0) {
@@ -70,12 +70,21 @@ function spoonBowlGeometry() {
 }
 
 function spoonHandleGeometry() {
-  const positions = [], indices = [], nx = 28, nz = 8;
-  const startX = MINI.spoonX + 0.16, endX = 1.19;
+  // Thin, broad spoon handle follows the SAME analytic ramp used by movement,
+  // ending at the apple ellipsoid instead of being a detached decoration.
+  const positions = [], indices = [], nx = 60, nz = 12;
+  const dx = SPOON.end[0] - SPOON.start[0];
+  const dz = SPOON.end[1] - SPOON.start[1];
+  const len = Math.hypot(dx, dz);
+  const side = [-dz / len, dx / len];
   for (let i = 0; i <= nx; i += 1) {
-    const x = startX + (endX - startX) * i / nx;
+    const t = i / nx;
+    const midX = SPOON.start[0] + t * dx;
+    const midZ = SPOON.start[1] + t * dz;
     for (let j = 0; j <= nz; j += 1) {
-      const z = MINI.spoonZ + (j / nz * 2 - 1) * 0.11;
+      const lateral = (j / nz * 2 - 1) * SPOON.halfWidth * 0.96;
+      const x = midX + side[0] * lateral;
+      const z = midZ + side[1] * lateral;
       positions.push(x, walkingHeight(x, z) + 0.009, z);
     }
   }
@@ -86,11 +95,11 @@ function spoonHandleGeometry() {
       indices.push(a, a + 1, b, b, a + 1, b + 1);
     }
   }
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geom.setIndex(indices);
-  geom.computeVertexNormals();
-  return geom;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function addMarker(parent, x, y, z, color) {
@@ -167,8 +176,8 @@ export function createMiniatureScene(group) {
   leafMesh.scale.set(0.12, 0.024, 0.066);
   leafMesh.rotation.z = 0.32;
 
-  // Spoon is a thin metal heightfield on the dish, with a depressed bowl and
-  // clearly widened handle to make its miniature path easy to test.
+  // Spoon: its elongated metal handle becomes an actual uphill bridge from the
+  // ceramic bowl to the red apple. Mesh and navigable height come from one field.
   attach(group, spoonBowlGeometry(), silver);
   attach(group, spoonHandleGeometry(), silver);
 
@@ -180,8 +189,8 @@ export function createMiniatureScene(group) {
   addMarker(group, -1.1, MINI.seatY + 0.04, 0.56, 0xeac876);
   addMarker(group, 0.02, plateHeight(0.02, -0.72) + 0.05, -0.72, 0xeac876);
   addMarker(group, ax, ay + MINI.appleHeight + 0.055, az, 0xff7c6c);
-  addMarker(group, 0.87, walkingHeight(0.87, MINI.spoonZ) + 0.04,
-    MINI.spoonZ, 0x89cefa);
+  addMarker(group, 0.83, walkingHeight(0.83, 0.28) + 0.04,
+    0.28, 0x89cefa);
 
   const faded = [
     { m: wood, originalOpacity: 1 }, { m: ceramic, originalOpacity: 1 },
@@ -194,7 +203,7 @@ export function createMiniatureScene(group) {
       // cameras. A temporary translucent presentation makes the test leg
       // observable; the physical surfaces remain solid.
       const shouldFade = ant.shape === 'miniature' &&
-        (ant.surface === 'ground' || (ant.surface === 'leg' && ant.p[1] < -0.15));
+        (ant.surface === 'ground' || (ant.surface === 'leg' && ant.p[1] < -0.15 * MINI_SCALE));
       if (shouldFade === lastFade) return;
       lastFade = shouldFade;
       for (const { m } of faded) {
