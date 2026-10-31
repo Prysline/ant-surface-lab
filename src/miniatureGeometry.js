@@ -145,7 +145,7 @@ function appleLobes(q, theta) {
   // Fruit lobes grow towards the shoulder and vanish near the supporting
   // foot and top dimple. Both renderer and navigation sample this same value.
   const normalized = q / APPLE_METRICS.length;
-  return 1 + 0.027 * Math.cos(5 * theta) *
+  return 1 + 0.027 * (Math.cos(5 * theta) - 1) *
     Math.sin(Math.PI * normalized) ** 2;
 }
 export function platePoint(q, theta, includeSpoon = false) {
