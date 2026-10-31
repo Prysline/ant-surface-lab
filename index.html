@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1820" />
+  <meta name="description" content="在同一個三維場景，比較世界方向投影與平行搬運的表面法線鏡頭。" />
+  <title>螞蟻表面實驗室 · Ant Surface Lab</title>
+</head>
+<body>
+  <div class="app" id="lab">
+    <header class="site-header">
+      <div class="brand">
+        <div class="brand-symbol" aria-hidden="true">🐜</div>
+        <div>
+          <div class="eyebrow">SURFACE GEOMETRY / CAMERA LAB</div>
+          <h1>螞蟻表面實驗室 <span class="version">v0.1</span></h1>
+        </div>
+      </div>
+      <div class="live-status"><span class="status-dot"></span><span id="status">載入中</span></div>
+    </header>
+
+    <div class="headline">
+      <div>
+        <p class="eyebrow">ONE WORLD · TWO CAMERA FRAMES</p>
+        <h2>同一隻螞蟻，兩種觀看世界的方式。</h2>
+        <p class="description">螞蟻依世界座標沿著物體表面移動。兩個法線鏡頭同時跟隨，固定監視器則呈現真正的三維位置。</p>
+      </div>
+      <div class="scene-pill">測試原型 <span>／</span> 非完整遊戲</div>
+    </div>
+
+    <div class="workspace">
+      <main class="view-stack" aria-label="同步三維觀察畫面">
+        <div class="section-heading">
+          <span class="section-title">01 <span>雙鏡頭比較</span></span>
+          <span class="section-hint">A／B 會觀察相同的螞蟻與路徑</span>
+        </div>
+        <div class="dual-views">
+          <section class="viewport primary-view driving" id="view-a" aria-label="鏡頭 A：世界方向投影">
+            <div class="viewport-top"><span class="camera-id cam-a">A</span><div><strong>世界方向投影</strong><small>固定參考軸投影到局部表面</small></div></div>
+            <span class="drive-indicator">控制來源</span>
+            <span class="viewport-corner corner-tl"></span><span class="viewport-corner corner-br"></span>
+            <span class="viewport-footer">WORLD-REFERENCED UP</span>
+          </section>
+          <section class="viewport primary-view" id="view-b" aria-label="鏡頭 B：平行搬運">
+            <div class="viewport-top"><span class="camera-id cam-b">B</span><div><strong>平行搬運</strong><small>延續上一刻的局部畫面方向</small></div></div>
+            <span class="drive-indicator">同步觀察</span>
+            <span class="viewport-corner corner-tl"></span><span class="viewport-corner corner-br"></span>
+            <span class="viewport-footer">PARALLEL TRANSPORT</span>
+          </section>
+        </div>
+
+        <div class="section-heading monitor-heading">
+          <span class="section-title">02 <span>世界固定監視器</span></span>
+          <span class="section-hint">點選可放大／縮回</span>
+        </div>
+        <div class="monitor-views">
+          <section class="viewport monitor-view" id="monitor-top" aria-label="世界俯視監視器" tabindex="0">
+            <span class="monitor-label"><span class="monitor-square"></span>俯視 · XZ</span>
+            <span class="monitor-expand">⤢</span>
+          </section>
+          <section class="viewport monitor-view" id="monitor-front" aria-label="世界正視監視器" tabindex="0">
+            <span class="monitor-label"><span class="monitor-square"></span>正視 · XY</span>
+            <span class="monitor-expand">⤢</span>
+          </section>
+          <section class="viewport monitor-view" id="monitor-side" aria-label="世界側視監視器" tabindex="0">
+            <span class="monitor-label"><span class="monitor-square"></span>側視 · YZ</span>
+            <span class="monitor-expand">⤢</span>
+          </section>
+        </div>
+        <p class="legend"><i class="legend-line normal"></i>法線　<i class="legend-line facing"></i>朝向　<i class="legend-line camera-a"></i>A 畫面上方　<i class="legend-line camera-b"></i>B 畫面上方</p>
+      </main>
+
+      <aside class="controls" aria-label="實驗控制面板">
+        <section class="panel">
+          <div class="panel-heading"><span class="panel-number">01</span><h3>測試地形</h3></div>
+          <label class="field-label" for="shape">目前幾何物體</label>
+          <select id="shape">
+            <option value="cube">立方體 · 跨越直角邊緣</option>
+            <option value="cylinder">圓柱體 · 曲率連續變化</option>
+            <option value="sphere">球體 · 曲面閉合路徑</option>
+          </select>
+          <p class="note">切換地形會重設螞蟻位置與兩個鏡頭的初始朝向。</p>
+        </section>
+        <section class="panel">
+          <div class="panel-heading"><span class="panel-number">02</span><h3>操作視角</h3></div>
+          <p class="note control-note">僅選取一個鏡頭作為方向輸入的基準；兩個畫面始終同步。</p>
+          <div class="segmented" role="group" aria-label="選擇控制鏡頭">
+            <button id="control-a" class="selected" type="button" aria-pressed="true"><span>A</span> 世界投影</button>
+            <button id="control-b" type="button" aria-pressed="false"><span>B</span> 平行搬運</button>
+          </div>
+          <div class="movement-area">
+            <div class="touch-control">
+              <div id="joystick" class="joystick" aria-label="虛擬移動搖桿" role="application">
+                <span class="joy-compass top">↑</span><span class="joy-compass left">←</span>
+                <span class="joy-compass right">→</span><span class="joy-compass bottom">↓</span>
+                <div id="joystick-knob" class="joystick-knob"></div>
+              </div>
+              <span class="touch-label">觸控搖桿</span>
+            </div>
+            <div class="keyboard-instructions">
+              <div class="key-row"><kbd>W</kbd></div>
+              <div class="key-row"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div>
+              <p>鍵盤方向鍵也可控制。轉彎只改變螞蟻朝向，不讓鏡頭跟著自旋。</p>
+            </div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-heading"><span class="panel-number">03</span><h3>路徑實驗</h3></div>
+          <div class="action-grid">
+            <button type="button" id="demo" class="button button-primary">▶ 預設路徑</button>
+            <button type="button" id="pause" class="button button-secondary">暫停</button>
+            <button type="button" id="replay" class="button button-secondary">↺ 重新播放</button>
+            <button type="button" id="reset" class="button button-secondary">重設場景</button>
+          </div>
+          <p class="note">預設路徑使用固定世界運動，不依賴 A／B 的操作鏡頭。手動輸入會中止演示。</p>
+        </section>
+        <section class="panel">
+          <div class="panel-heading"><span class="panel-number">04</span><h3>實驗數據</h3></div>
+          <div class="readouts">
+            <div class="readout"><span>世界座標 X / Y / Z</span><output id="position">—</output></div>
+            <div class="readout"><span>表面法線</span><output id="normal">—</output></div>
+            <div class="readout"><span>面朝方向</span><output id="heading">—</output></div>
+            <div class="readout"><span>A／B 畫面上方夾角</span><output id="angle" class="accent-value">—</output></div>
+            <div class="readout"><span>目前移動模式</span><output id="motion">—</output></div>
+          </div>
+          <label class="checkline"><input type="checkbox" id="trail" checked />顯示行走軌跡</label>
+          <label class="field-label" for="quality">畫面解析度</label>
+          <select id="quality">
+            <option value="low">節能 · 適合較慢的手機</option>
+            <option value="medium" selected>平衡 · 預設</option>
+            <option value="high">高畫質 · 適合電腦</option>
+          </select>
+        </section>
+      </aside>
+    </div>
+
+    <footer class="footer">
+      <span>ANT SURFACE LAB / 3D WORLD · 2D SURFACE MOTION</span>
+      <span>三維位置不因觀察鏡頭的選擇而改變。</span>
+    </footer>
+  </div>
+  <noscript>本實驗需要啟用 JavaScript 才能顯示三維場景。</noscript>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
