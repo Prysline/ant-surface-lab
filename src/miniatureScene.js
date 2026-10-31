@@ -116,7 +116,7 @@ function createSpoon(group, silver, metalEdge) {
 
   const underside = parametricMesh(38, 80, (t, angle) => {
     const [x, z] = ellipsePoint(t, angle);
-    return [x, walkingHeight(x, z) - 0.008, z];
+    return [x, Math.max(plateHeight(x, z) + 0.002, walkingHeight(x, z) - 0.008), z];
   });
   attach(group, underside, metalEdge);
 
@@ -147,7 +147,7 @@ function createSpoon(group, silver, metalEdge) {
       const z = midZ + side[1] * amount;
       const h = walkingHeight(x, z);
       positions.push(x, h + 0.006, z);
-      undersidePositions.push(x, h - 0.008, z);
+      undersidePositions.push(x, Math.max(plateHeight(x, z) + 0.002, h - 0.008), z);
     }
   }
   const cols = widths + 1;
