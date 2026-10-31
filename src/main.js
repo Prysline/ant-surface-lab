@@ -5,6 +5,7 @@ import {
 import {
   SurfaceCamera, makeMonitor, updateMonitorAspect, cameraDifferenceDegrees,
 } from './cameras.js';
+import { calculateViewRect } from './viewports.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -353,26 +354,33 @@ function updateVisuals() {
   bUpArrow.setDirection(new THREE.Vector3(...cameraB.screenUp));
 }
 
+const renderSize = new THREE.Vector2();
+
 function renderView(element, camera) {
-  const rect = element.getBoundingClientRect();
-  const w = window.innerWidth, h = window.innerHeight;
-  const left = Math.max(0, Math.round(rect.left));
-  const right = Math.min(w, Math.round(rect.right));
-  const top = Math.max(0, Math.round(rect.top));
-  const bottom = Math.min(h, Math.round(rect.bottom));
-  if (right <= left || bottom <= top) return;
-  const width = right - left, height = bottom - top;
+  const panelRect = element.getBoundingClientRect();
+  const canvasRect = renderer.domElement.getBoundingClientRect();
+  renderer.getSize(renderSize);
+  const region = calculateViewRect(
+    panelRect, canvasRect, renderSize.x, renderSize.y,
+  );
+  if (!region) return;
+
+  // IMPORTANT: projection and viewport use the FULL panel dimensions.
+  // Only scissor is clipped. Scrolling must never zoom or stretch the camera.
   if (camera.isPerspectiveCamera) {
-    camera.aspect = width / height;
+    camera.aspect = region.aspect;
     camera.updateProjectionMatrix();
-  } else updateMonitorAspect(camera, width / height);
-  renderer.setViewport(left, h - bottom, width, height);
-  renderer.setScissor(left, h - bottom, width, height);
+  } else updateMonitorAspect(camera, region.aspect);
+
+  const vp = region.viewport, clip = region.scissor;
+  renderer.setViewport(vp.x, vp.y, vp.width, vp.height);
+  renderer.setScissor(clip.x, clip.y, clip.width, clip.height);
   renderer.setScissorTest(true);
   renderer.setClearColor(0x142833, 1);
   renderer.clear(true, true, true);
   renderer.render(scene, camera);
 }
+
 function render() {
   renderer.setScissorTest(false);
   renderer.setClearColor(0x0b1820, 1);
@@ -420,6 +428,16 @@ $('trail').addEventListener('change', (event) => {
   trail.visible = showTrail;
 });
 $('quality').addEventListener('change', resize);
+$('transition').addEventListener('change', (event) => {
+  const milliseconds = Number(event.target.value);
+  cameraA.setTransitionMilliseconds(milliseconds);
+  cameraB.setTransitionMilliseconds(milliseconds);
+  // In instant mode, immediately show the normal-aligned target.
+  if (milliseconds === 0) {
+    cameraA.present(0, true);
+    cameraB.present(0, true);
+  }
+});
 for (const view of [viewTop, viewFront, viewSide]) {
   view.addEventListener('click', () => {
     const expand = !view.classList.contains('expanded');
@@ -491,9 +509,13 @@ function resize() {
   const quality = $('quality').value;
   const cap = quality === 'low' ? 0.85 : quality === 'high' ? 2 : 1.35;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap));
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  // CSS canvas size MUST equal renderer's CSS-pixel dimensions. 100vh on
+  // mobile can differ from innerHeight while the browser toolbar collapses.
+  renderer.setSize(window.innerWidth, window.innerHeight, true);
 }
 window.addEventListener('resize', resize);
+// Android / iOS browser chrome can change the visible viewport on scroll.
+window.visualViewport?.addEventListener('resize', resize);
 resize();
 setActive('A');
 reset('cube');
@@ -509,6 +531,8 @@ function animate(now) {
       accumulator -= fixedDt;
     }
   } else accumulator = 0;
+  cameraA.present(elapsed);
+  cameraB.present(elapsed);
   updateVisuals();
   render();
   if (now - lastTelemetry > 120) {
