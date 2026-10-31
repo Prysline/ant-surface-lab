@@ -1,14 +1,18 @@
-// Small dollhouse-style geometry for the connected miniature test surface.
-// Coordinates and contact seams are authored in miniature.js (navigation source
-// of truth). Geometry must follow that file; changing only the mesh is a bug.
+/**
+ * Visible miniature props created from the SAME authored profile data as
+ * src/miniature.js. No free-floating apple ellipsoid or filled plate cylinder.
+ */
 import * as THREE from 'three';
 import {
-  MINI, LEGS, SPOON, MINI_SCALE, plateHeight, walkingHeight, appleCenter,
-} from './miniature.js';
+  MINI, LEGS, SPOON, MINI_SCALE, PLATE_PROFILE, APPLE_PROFILE,
+  PLATE_METRICS, APPLE_METRICS, platePoint, applePoint,
+  plateHeight, walkingHeight, spoonBowlInfo, appleContact,
+} from './miniatureGeometry.js';
 
-function material(color, roughness = 0.73, metalness = 0.0) {
-  return new THREE.MeshStandardMaterial({ color, roughness, metalness, side: THREE.DoubleSide });
-}
+const material = (color, roughness = 0.73, metalness = 0) =>
+  new THREE.MeshStandardMaterial({
+    color, roughness, metalness, side: THREE.DoubleSide,
+  });
 
 function attach(parent, geometry, surface, x = 0, y = 0, z = 0) {
   const mesh = new THREE.Mesh(geometry, surface);
@@ -17,22 +21,18 @@ function attach(parent, geometry, surface, x = 0, y = 0, z = 0) {
   return mesh;
 }
 
-function polarSurface(radius, radialSteps, divisions, getHeight) {
-  const positions = [];
-  const indices = [];
-  for (let j = 0; j <= radialSteps; j += 1) {
-    const r = radius * j / radialSteps;
-    for (let i = 0; i <= divisions; i += 1) {
-      const a = Math.PI * 2 * i / divisions;
-      const x = r * Math.cos(a), z = r * Math.sin(a);
-      positions.push(x, getHeight(x, z), z);
+function parametricMesh(rings, slices, point, materialSide = true) {
+  const positions = [], indices = [], width = slices + 1;
+  for (let i = 0; i <= rings; i += 1) {
+    const t = i / rings;
+    for (let j = 0; j <= slices; j += 1) {
+      const angle = Math.PI * 2 * j / slices;
+      positions.push(...point(t, angle));
     }
   }
-  const width = divisions + 1;
-  for (let j = 0; j < radialSteps; j += 1) {
-    for (let i = 0; i < divisions; i += 1) {
-      const a = j * width + i, b = a + width;
-      // x/z plane: reverse winding for upper-facing normal.
+  for (let i = 0; i < rings; i += 1) {
+    for (let j = 0; j < slices; j += 1) {
+      const a = i * width + j, b = a + width;
       indices.push(a, a + 1, b, b, a + 1, b + 1);
     }
   }
@@ -43,177 +43,234 @@ function polarSurface(radius, radialSteps, divisions, getHeight) {
   return geometry;
 }
 
-function spoonBowlGeometry() {
-  const positions = [], indices = [], slices = 56, rings = 12;
-  const rx = 0.265, rz = 0.205;
-  for (let j = 0; j <= rings; j += 1) {
-    const r = j / rings;
-    for (let k = 0; k <= slices; k += 1) {
-      const angle = Math.PI * 2 * k / slices;
-      const x = MINI.spoonX + r * Math.cos(angle) * rx;
-      const z = MINI.spoonZ + r * Math.sin(angle) * rz;
-      positions.push(x, walkingHeight(x, z) + 0.0075, z);
-    }
-  }
-  const w = slices + 1;
-  for (let j = 0; j < rings; j += 1) {
-    for (let k = 0; k < slices; k += 1) {
-      const a = j * w + k, b = a + w;
-      indices.push(a, a + 1, b, b, a + 1, b + 1);
-    }
-  }
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geom.setIndex(indices);
-  geom.computeVertexNormals();
-  return geom;
+function createDish(group, ceramic, underside) {
+  // Revolving this CLOSED cross section is a physical dish: raised foot ring
+  // at r=0.43..0.55 is the ONLY region with y == stool seatY.
+  const shell = parametricMesh(240, 120,
+    (t, angle) => platePoint(t * PLATE_METRICS.length, angle), true);
+  const plateMesh = attach(group, shell, ceramic);
+
+  // Underside is subtly darker: physically separate material group only,
+  // but the meshes use the same exact radial profile coordinates.
+  const outerUnder = parametricMesh(110, 120,
+    (t, angle) => platePoint(PLATE_METRICS.distances[9] +
+      (PLATE_METRICS.distances[17] - PLATE_METRICS.distances[9]) * t, angle));
+  const underMesh = attach(group, outerUnder, underside);
+  underMesh.material.polygonOffset = true;
+  underMesh.material.polygonOffsetFactor = -1;
+
+  const ring = new THREE.TorusGeometry(1.22, 0.012, 6, 100);
+  const rim = attach(group, ring, ceramic, 0,
+    MINI.seatY + 0.212, 0);
+  rim.rotation.x = Math.PI / 2;
+
+  return { plateMesh, underMesh };
 }
 
-function spoonHandleGeometry() {
-  // Thin, broad spoon handle follows the SAME analytic ramp used by movement,
-  // ending at the apple ellipsoid instead of being a detached decoration.
-  const positions = [], indices = [], nx = 60, nz = 12;
+function createApple(group, skin, stemMaterial, leafMaterial) {
+  // Single upper fruit skin above the dish. No hidden bottom hemisphere
+  // entering the plate or wooden stool. Broad shoulders and top dimple.
+  const geometry = parametricMesh(160, 104,
+    (t, a) => applePoint(t * APPLE_METRICS.length, a));
+  const appleMesh = attach(group, geometry, skin);
+
+  const crown = applePoint(APPLE_METRICS.length, 0);
+  const stem = attach(group,
+    new THREE.CylinderGeometry(0.019, 0.031, 0.155, 10),
+    stemMaterial, crown[0], crown[1] + 0.074, crown[2]);
+  stem.rotation.z = 0.16;
+
+  const leaf = attach(group, new THREE.SphereGeometry(1, 18, 10),
+    leafMaterial, crown[0] + 0.10, crown[1] + 0.155, crown[2] - 0.015);
+  leaf.scale.set(0.12, 0.026, 0.063);
+  leaf.rotation.z = 0.32;
+  leaf.rotation.y = -0.22;
+
+  return appleMesh;
+}
+
+function spoonAxis() {
+  const dx = SPOON.start[0] - SPOON.end[0];
+  const dz = SPOON.start[1] - SPOON.end[1];
+  const len = Math.hypot(dx, dz);
+  return { forward: [dx / len, dz / len], side: [-dz / len, dx / len] };
+}
+
+function ellipsePoint(r, angle) {
+  const { forward, side } = spoonAxis();
+  const ux = r * SPOON.bowlLong * Math.cos(angle);
+  const vz = r * SPOON.bowlWide * Math.sin(angle);
+  const x = SPOON.bowl[0] + ux * forward[0] + vz * side[0];
+  const z = SPOON.bowl[1] + ux * forward[1] + vz * side[1];
+  return [x, z];
+}
+
+function createSpoon(group, silver, metalEdge) {
+  // The interior is slightly depressed relative to the raised bowl rim.
+  // Top, bottom and outer seam give the prop readable metal thickness.
+  const top = parametricMesh(38, 80, (t, angle) => {
+    const [x, z] = ellipsePoint(t, angle);
+    return [x, walkingHeight(x, z) + 0.005, z];
+  });
+  attach(group, top, silver);
+
+  const underside = parametricMesh(38, 80, (t, angle) => {
+    const [x, z] = ellipsePoint(t, angle);
+    return [x, walkingHeight(x, z) - 0.008, z];
+  });
+  attach(group, underside, metalEdge);
+
+  const rimCurve = [];
+  for (let i = 0; i <= 80; i += 1) {
+    const [x, z] = ellipsePoint(0.94, 2 * Math.PI * i / 80);
+    rimCurve.push(new THREE.Vector3(x, walkingHeight(x, z) + 0.01, z));
+  }
+  const edgeGeometry = new THREE.TubeGeometry(
+    new THREE.CatmullRomCurve3(rimCurve, true), 84, 0.009, 6, true);
+  attach(group, edgeGeometry, silver);
+
+  const steps = 64, widths = 10;
+  const positions = [], undersidePositions = [], indices = [];
   const dx = SPOON.end[0] - SPOON.start[0];
   const dz = SPOON.end[1] - SPOON.start[1];
   const len = Math.hypot(dx, dz);
   const side = [-dz / len, dx / len];
-  for (let i = 0; i <= nx; i += 1) {
-    const t = i / nx;
-    const midX = SPOON.start[0] + t * dx;
-    const midZ = SPOON.start[1] + t * dz;
-    for (let j = 0; j <= nz; j += 1) {
-      const lateral = (j / nz * 2 - 1) * SPOON.halfWidth * 0.96;
-      const x = midX + side[0] * lateral;
-      const z = midZ + side[1] * lateral;
-      positions.push(x, walkingHeight(x, z) + 0.009, z);
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const midX = SPOON.start[0] + dx * t;
+    const midZ = SPOON.start[1] + dz * t;
+    // Narrow throat with subtly widening end like a stamped metal spoon.
+    const width = SPOON.halfWidth * (0.8 + 0.2 * Math.sin(Math.PI * t));
+    for (let j = 0; j <= widths; j += 1) {
+      const amount = (j / widths * 2 - 1) * width * 0.94;
+      const x = midX + side[0] * amount;
+      const z = midZ + side[1] * amount;
+      const h = walkingHeight(x, z);
+      positions.push(x, h + 0.006, z);
+      undersidePositions.push(x, h - 0.008, z);
     }
   }
-  const w = nz + 1;
-  for (let i = 0; i < nx; i += 1) {
-    for (let j = 0; j < nz; j += 1) {
-      const a = i * w + j, b = a + w;
+  const cols = widths + 1;
+  for (let i = 0; i < steps; i += 1) {
+    for (let j = 0; j < widths; j += 1) {
+      const a = i * cols + j, b = a + cols;
       indices.push(a, a + 1, b, b, a + 1, b + 1);
     }
   }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
+  const surface = new THREE.BufferGeometry();
+  surface.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  surface.setIndex(indices);
+  surface.computeVertexNormals();
+  attach(group, surface, silver);
+
+  const back = new THREE.BufferGeometry();
+  back.setAttribute('position', new THREE.Float32BufferAttribute(undersidePositions, 3));
+  back.setIndex(indices.map((v, i) => {
+    const triangle = Math.floor(i / 3) * 3;
+    return indices[triangle + (i % 3 === 1 ? 2 : i % 3 === 2 ? 1 : 0)];
+  }));
+  back.computeVertexNormals();
+  attach(group, back, metalEdge);
+
+  // A thin highlight line makes the raised handle visibly continuous.
+  const centerline = [];
+  for (let i = 0; i <= 36; i += 1) {
+    const t = i / 36;
+    const x = SPOON.start[0] + dx * t;
+    const z = SPOON.start[1] + dz * t;
+    centerline.push(new THREE.Vector3(x, walkingHeight(x, z) + 0.009, z));
+  }
+  attach(group, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(centerline),
+    36, 0.006, 5, false),
+  new THREE.MeshStandardMaterial({ color: 0xe7f0f0, metalness: 0.68, roughness: 0.2 }));
 }
 
-function addMarker(parent, x, y, z, color) {
-  const mesh = attach(
-    parent,
-    new THREE.SphereGeometry(0.055, 8, 6),
-    new THREE.MeshBasicMaterial({ color }),
-    x, y, z,
-  );
-  // Diagnostics are visible only in the fixed monitor cameras (layer 1).
+function addMarker(parent, point, color) {
+  const mesh = attach(parent, new THREE.SphereGeometry(0.033, 9, 7),
+    new THREE.MeshBasicMaterial({ color }), ...point);
   mesh.layers.set(1);
 }
 
 export function createMiniatureScene(group) {
-  const wood = material(0x9b7454, 0.83);
-  const edge = material(0x6d4a37, 0.83);
-  const platform = material(0xa9a18d, 0.92);
-  const ceramic = material(0xe2e9dd, 0.44);
-  const red = material(0xb94d3d, 0.57);
-  const silver = material(0xc6cfd3, 0.24, 0.67);
-  const stem = material(0x4a3d28, 0.89);
-  const leaf = material(0x60825c, 0.74);
+  const wood = material(0xa17a58, 0.83);
+  const darkWood = material(0x73503a, 0.86);
+  const platform = material(0xaca391, 0.92);
+  const ceramic = material(0xe7ece6, 0.39);
+  const underside = material(0xc5ceca, 0.49);
+  const red = material(0xc84f38, 0.57);
+  const silver = material(0xd2dce0, 0.27, 0.60);
+  const metalEdge = material(0x929da2, 0.34, 0.48);
+  const stem = material(0x59402b, 0.90);
+  const leaf = material(0x62875d, 0.76);
 
-  // Miniature model base. Upper face precisely matches the ground walk plane.
   attach(group, new THREE.BoxGeometry(8, 0.22, 7.4), platform,
     0, MINI.floorY - 0.11, 0);
-  const platformEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(8.02, 0.225, 7.42)),
-    new THREE.LineBasicMaterial({ color: 0xe4d6b8, transparent: true, opacity: 0.35 }),
+  const platformBorder = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(8.02, 0.224, 7.42)),
+    new THREE.LineBasicMaterial({
+      color: 0xeee0c5, transparent: true, opacity: 0.34,
+    }),
   );
-  platformEdges.position.y = MINI.floorY - 0.11;
-  group.add(platformEdges);
+  platformBorder.position.y = MINI.floorY - 0.11;
+  group.add(platformBorder);
 
-  const height = MINI.seatY - MINI.floorY;
+  const legHeight = MINI.seatY - MINI.floorY;
   for (const [x, z] of LEGS) {
-    attach(group, new THREE.CylinderGeometry(MINI.legRadius, MINI.legRadius, height, 20),
-      wood, x, (MINI.seatY + MINI.floorY) / 2, z);
-    // Simple differentiated feet make leg orientation easier to read.
-    attach(group, new THREE.CylinderGeometry(0.225, 0.225, 0.085, 20),
-      edge, x, MINI.floorY + 0.0425, z);
+    attach(group, new THREE.CylinderGeometry(MINI.legRadius,
+      MINI.legRadius, legHeight, 24),
+    wood, x, (MINI.seatY + MINI.floorY) / 2, z);
+    attach(group, new THREE.CylinderGeometry(0.215, 0.215, 0.08, 24),
+      darkWood, x, MINI.floorY + 0.04, z);
   }
-
-  // Stool seat (not a free-floating thin plane). Its upper face is walkable.
-  const seatThickness = 0.18;
-  const seatMesh = attach(
-    group,
-    new THREE.BoxGeometry(MINI.seatHalf * 2, seatThickness, MINI.seatHalf * 2),
-    wood, 0, MINI.seatY - seatThickness / 2, 0,
+  const thickness = 0.18;
+  const seatMesh = attach(group,
+    new THREE.BoxGeometry(MINI.seatHalf * 2, thickness, MINI.seatHalf * 2),
+    wood, 0, MINI.seatY - thickness / 2, 0);
+  const stoolEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(
+      new THREE.BoxGeometry(MINI.seatHalf * 2 + 0.005,
+        thickness + 0.005, MINI.seatHalf * 2 + 0.005)),
+    new THREE.LineBasicMaterial({
+      color: 0xeacba4, transparent: true, opacity: 0.27,
+    }),
   );
-  const seatBorder = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(MINI.seatHalf * 2 + 0.006,
-      seatThickness + 0.006, MINI.seatHalf * 2 + 0.006)),
-    new THREE.LineBasicMaterial({ color: 0xe9c9a0, transparent: true, opacity: 0.28 }),
-  );
-  seatBorder.position.y = MINI.seatY - seatThickness / 2;
-  group.add(seatBorder);
+  stoolEdges.position.y = MINI.seatY - thickness / 2;
+  group.add(stoolEdges);
 
-  // Ceramic plate: continuous radial heightfield with a visible inner bowl/rim.
-  const plateMesh = attach(group, polarSurface(MINI.plateRadius, 30, 96, plateHeight), ceramic);
-  attach(group, new THREE.CylinderGeometry(MINI.plateRadius - 0.07,
-    MINI.plateRadius - 0.14, 0.042, 96),
-  ceramic, 0, MINI.seatY + 0.012, 0);
+  const { plateMesh, underMesh } = createDish(group, ceramic, underside);
+  const appleMesh = createApple(group, red, stem, leaf);
+  createSpoon(group, silver, metalEdge);
 
-  // Red apple intersects the flat plate center at its equator. The upper
-  // ellipsoid is a walkable patch; lower half is hidden by the plate surface.
-  const [ax, ay, az] = appleCenter();
-  const apple = attach(group, new THREE.SphereGeometry(1, 48, 30),
-    red, ax, ay, az);
-  apple.scale.set(MINI.appleRadius, MINI.appleHeight, MINI.appleRadius);
-  attach(group, new THREE.CylinderGeometry(0.023, 0.029, 0.18, 8),
-    stem, ax, ay + MINI.appleHeight + 0.068, az);
-  const leafMesh = attach(group, new THREE.SphereGeometry(1, 14, 10),
-    leaf, ax + 0.09, ay + MINI.appleHeight + 0.10, az);
-  leafMesh.scale.set(0.12, 0.024, 0.066);
-  leafMesh.rotation.z = 0.32;
+  addMarker(group, [LEGS[0][0] - MINI.legRadius, MINI.floorY + 0.03,
+    LEGS[0][1]], 0x63d2a4);
+  addMarker(group, [LEGS[0][0] - MINI.legRadius - 0.004, -0.75,
+    LEGS[0][1]], 0x63d2a4);
+  addMarker(group, [-1.1, MINI.seatY + 0.055, 0.56], 0xeac876);
+  addMarker(group, [0.15, plateHeight(0.15, -0.94) + 0.06, -0.94], 0xeac876);
+  const appleTop = applePoint(APPLE_METRICS.length, 0);
+  addMarker(group, [appleTop[0], appleTop[1] + 0.048, appleTop[2]], 0xff8878);
+  const neck = SPOON.start;
+  addMarker(group, [neck[0], walkingHeight(...neck) + 0.05, neck[1]], 0x89cefa);
+  const touch = appleContact();
+  addMarker(group, [touch[0], touch[1] + 0.025, touch[2]], 0x9de2fa);
 
-  // Spoon: its elongated metal handle becomes an actual uphill bridge from the
-  // ceramic bowl to the red apple. Mesh and navigable height come from one field.
-  attach(group, spoonBowlGeometry(), silver);
-  attach(group, spoonHandleGeometry(), silver);
-
-  // Leg and object test points, visible in the world-fixed monitors only.
-  addMarker(group, LEGS[0][0] - MINI.legRadius, MINI.floorY + 0.035,
-    LEGS[0][1], 0x63d2a4);
-  addMarker(group, LEGS[0][0] - MINI.legRadius - 0.008, -0.75,
-    LEGS[0][1], 0x63d2a4);
-  addMarker(group, -1.1, MINI.seatY + 0.04, 0.56, 0xeac876);
-  addMarker(group, 0.02, plateHeight(0.02, -0.72) + 0.05, -0.72, 0xeac876);
-  addMarker(group, ax, ay + MINI.appleHeight + 0.055, az, 0xff7c6c);
-  addMarker(group, 0.83, walkingHeight(0.83, 0.28) + 0.04,
-    0.28, 0x89cefa);
-
-  const faded = [
-    { m: wood, originalOpacity: 1 }, { m: ceramic, originalOpacity: 1 },
-    { m: red, originalOpacity: 1 }, { m: silver, originalOpacity: 1 },
-  ];
+  const faded = [wood, ceramic, underside, red, silver, metalEdge];
   let lastFade = null;
   return {
     updateVisibility(ant) {
-      // Under the stool, its seat/props can hide the ant from both top-down
-      // cameras. A temporary translucent presentation makes the test leg
-      // observable; the physical surfaces remain solid.
       const shouldFade = ant.shape === 'miniature' &&
-        (ant.surface === 'ground' || (ant.surface === 'leg' && ant.p[1] < -0.15 * MINI_SCALE));
+        (ant.surface === 'ground' ||
+        (ant.surface === 'leg' && ant.p[1] < -0.15 * MINI_SCALE));
       if (shouldFade === lastFade) return;
       lastFade = shouldFade;
-      for (const { m } of faded) {
+      for (const m of faded) {
         m.transparent = shouldFade;
-        m.opacity = shouldFade ? 0.3 : 1;
+        m.opacity = shouldFade ? 0.28 : 1;
         m.depthWrite = !shouldFade;
         m.needsUpdate = true;
       }
     },
     clear() { lastFade = null; },
-    seatMesh, plateMesh,
+    seatMesh, plateMesh, underMesh, appleMesh,
   };
 }
