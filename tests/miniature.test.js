@@ -162,6 +162,29 @@ test('spoon surface crosses apple footprint only along a narrow raised corridor'
   valid(s);
 });
 
+test('apple can step back onto the spoon through the authored contact', () => {
+  const s = miniatureSpawn('apple');
+  const contact = appleContact();
+  const center = appleCenter();
+  const normal = [
+    (contact[0] - center[0]) / (MINI.appleRadius ** 2),
+    (contact[1] - center[1]) / (MINI.appleHeight ** 2),
+    (contact[2] - center[2]) / (MINI.appleRadius ** 2),
+  ];
+  const magnitude = length(normal);
+  s.p = contact.map((v) => v * MINI_SCALE);
+  s.n = normal.map((v) => v / magnitude);
+  const towardHandle = [
+    SPOON.start[0] - SPOON.end[0], 0,
+    SPOON.start[1] - SPOON.end[1],
+  ];
+  move(s, towardHandle, 0.03);
+  assert.equal(s.surface, 'seat');
+  valid(s);
+  const p = local(s).p;
+  near(p[1], walkingHeight(p[0], p[2]), 0.015);
+});
+
 test('stool rim without supporting leg does not invent a bridge into empty space', () => {
   const s = miniatureSpawn('stool');
   move(s, [-1, 0, 0], 1.4);
