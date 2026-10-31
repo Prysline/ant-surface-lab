@@ -6,6 +6,7 @@ import {
   SurfaceCamera, makeMonitor, updateMonitorAspect, cameraDifferenceDegrees,
 } from './cameras.js';
 import { calculateViewRect } from './viewports.js';
+import { getCachedBlockers, renderWithOcclusion } from './occlusion.js';
 import { MINI, MINI_SCALE, miniatureSpawn, moveMiniature } from './miniature.js';
 import { createMiniatureScene } from './miniatureScene.js';
 import './style.css';
@@ -40,6 +41,7 @@ scene.add(coolLight);
 const geometryGroup = new THREE.Group();
 scene.add(geometryGroup);
 let miniaturePresentation = null;
+let occlusionEnabled = true;
 const debugGroup = new THREE.Group();
 debugGroup.layers.set(1);
 scene.add(debugGroup);
@@ -411,7 +413,14 @@ function renderView(element, camera) {
   renderer.setScissorTest(true);
   renderer.setClearColor(0x142833, 1);
   renderer.clear(true, true, true);
-  renderer.render(scene, camera);
+  if (occlusionEnabled && ant.shape === 'miniature') {
+    // Different camera views fade different meshes, never the entire world.
+    const antTarget = antRoot.localToWorld(new THREE.Vector3(0, 0.20, 0));
+    const blockers = getCachedBlockers(camera, antTarget, geometryGroup);
+    renderWithOcclusion(blockers, () => renderer.render(scene, camera));
+  } else {
+    renderer.render(scene, camera);
+  }
 }
 
 function render() {
@@ -432,7 +441,7 @@ function telemetry() {
   $('heading').textContent = format(ant.f);
   $('angle').textContent = cameraDifferenceDegrees(cameraA, cameraB).toFixed(1) + '°';
   $('motion').textContent = demo ? '預設路徑' : (paused ? '暫停' : '手動控制');
-  $('surface').textContent = ant.shape === 'miniature' ? ({ ground: '展示台地面', leg: '凳腳', seat: '木凳面', plate: '餐盤（上面／盤緣／盤底／圈足）／湯匙', apple: '蘋果表面' }[ant.surface] || '未知') : ant.shape;
+  $('surface').textContent = ant.shape === 'miniature' ? ({ ground: '展示台地面', leg: '凳腳', seat: '木凳面', seatSide: '凳面側壁', plate: '餐盤（上面／盤緣／盤底／圈足）／湯匙', apple: '蘋果表面' }[ant.surface] || '未知') : ant.shape;
 }
 
 function setActive(mode) {
@@ -460,6 +469,9 @@ $('pause').addEventListener('click', () => {
   paused = !paused;
   $('pause').textContent = paused ? '繼續' : '暫停';
   $('status').textContent = paused ? '已暫停' : (demo ? '路徑演示中' : '手動操作');
+});
+$('occlusion').addEventListener('change', (event) => {
+  occlusionEnabled = event.target.checked;
 });
 $('trail').addEventListener('change', (event) => {
   showTrail = event.target.checked;
