@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dot, length, sub, unit } from '../src/core.js';
 import {
-  MINI, MINI_SCALE, LEGS, SPOON,
+  MINI, MINI_SCALE, LEGS, SPOON, STOOL_SIDE_BOTTOM,
   plateHeight, walkingHeight, miniatureSpawn, moveMiniature,
   appleCenter, appleContact, spoonBridgeInfo, localMiniatureState,
 } from '../src/miniature.js';
@@ -20,7 +20,7 @@ const move = (s, direction, distance) =>
   moveMiniature(s, direction, distance * MINI_SCALE);
 
 function valid(s) {
-  assert.ok(['ground', 'leg', 'seat', 'plate', 'apple'].includes(s.surface), s.surface);
+  assert.ok(['ground', 'leg', 'seat', 'seatSide', 'plate', 'apple'].includes(s.surface), s.surface);
   assert.ok(s.p.every(Number.isFinite), 'finite world coordinates');
   near(length(s.n), 1, 1e-5);
   near(length(s.f), 1, 1e-5);
@@ -38,7 +38,7 @@ test('scale remains 4x, no implicit rescaling of the ant', () => {
 
 test('all six reset presets are attached to named authored surfaces', () => {
   const expected = {
-    ground: 'ground', leg: 'leg', stool: 'seat', plate: 'plate',
+    ground: 'ground', leg: 'leg', stool: 'seat', side: 'seatSide', plate: 'plate',
     apple: 'apple', spoon: 'plate',
   };
   for (const [name, surface] of Object.entries(expected)) {
@@ -116,6 +116,51 @@ test('walk from stool through the narrow foot, underside, lip and onto the dish'
   assert.ok(visitedTop, 'walker must reach inner top');
 });
 
+test('stool upper edge rolls down onto a physical vertical side', () => {
+  const s = miniatureSpawn('stool');
+  move(s, [-1, 0, 0], 0.75);
+  assert.equal(s.surface, 'seatSide');
+  const p = local(s).p;
+  near(p[0], -MINI.seatHalf, 1e-5);
+  assert.ok(p[1] < MINI.seatY);
+  near(s.n[0], -1, 1e-5);
+  valid(s);
+});
+
+test('a walker can climb a stool side onto its top without using a leg', () => {
+  const s = miniatureSpawn('side');
+  const start = local(s).p;
+  assert.equal(s.surface, 'seatSide');
+  assert.ok(start[1] > STOOL_SIDE_BOTTOM && start[1] < MINI.seatY);
+  move(s, [0, 1, 0], 0.20);
+  assert.equal(s.surface, 'seat');
+  near(local(s).p[1], MINI.seatY, 1e-5);
+  valid(s);
+});
+
+test('stool side bottom blocks unsupported travel into empty space', () => {
+  const s = miniatureSpawn('side');
+  move(s, [0, -1, 0], 0.30);
+  assert.equal(s.surface, 'seatSide');
+  near(local(s).p[1], STOOL_SIDE_BOTTOM, 1e-5);
+  valid(s);
+});
+
+test('a supporting leg joins the stool vertical side before the upper face', () => {
+  const s = miniatureSpawn('ground');
+  move(s, [1, 0, 0], 0.80);
+  assert.equal(s.surface, 'leg');
+  let visitedSide = false, visitedTop = false;
+  for (let i = 0; i < 330; i += 1) {
+    move(s, s.f, 0.012);
+    valid(s);
+    if (s.surface === 'seatSide') visitedSide = true;
+    if (s.surface === 'seat') { visitedTop = true; break; }
+  }
+  assert.equal(visitedSide, true, 'must meet physical side of tabletop');
+  assert.equal(visitedTop, true, 'must reach tabletop');
+});
+
 test('ground to stool leg is still a real geometric contact', () => {
   const s = miniatureSpawn('ground');
   move(s, [1, 0, 0], 0.80);
@@ -130,7 +175,10 @@ test('ground to stool leg is still a real geometric contact', () => {
 test('stool leg climbs to wooden seat and cannot jump into plate side', () => {
   const s = miniatureSpawn('ground');
   move(s, [1, 0, 0], 0.80);
-  for (let i = 0; i < 260 && s.surface === 'leg'; i += 1) {
+  // The new correct route is leg -> vertical seat side -> upper seat.
+  // Continue through the side instead of stopping the legacy test at its
+  // first successful transition away from the cylindrical leg.
+  for (let i = 0; i < 260 && s.surface !== 'seat'; i += 1) {
     move(s, s.f, 0.012);
   }
   assert.equal(s.surface, 'seat');
@@ -236,6 +284,41 @@ test('apple base can return to plate top without crossing ceramic', () => {
     move(s, s.f, 0.01);
   }
   assert.equal(s.surface, 'plate');
+  valid(s);
+});
+
+test('apple-to-spoon transfer has a walkable approach zone, not a single-pixel contact', () => {
+  const s = miniatureSpawn('apple');
+  const goalQ = APPLE_METRICS.distances[4];
+  s.q = goalQ - 0.08;
+  s.theta = 0.17;
+  s.p = applePoint(s.q, s.theta).map((v) => v * MINI_SCALE);
+  s.n = surfaceNormal('apple', s.q, s.theta);
+  let crossed = false, largestStep = 0;
+  for (let i = 0; i < 150; i += 1) {
+    const before = [...s.p];
+    const p = local(s).p;
+    const raw = [SPOON.start[0] - p[0], SPOON.start[1] * 0 + 0.02,
+      SPOON.start[1] - p[2]];
+    const d = unit(sub(raw, s.n.map((v) => dot(raw, s.n) * v)));
+    move(s, d, 0.009);
+    valid(s);
+    largestStep = Math.max(largestStep, length(sub(s.p, before)) / MINI_SCALE);
+    if (s.surface === 'plate') { crossed = true; break; }
+  }
+  assert.equal(crossed, true, 'reasonable approach from the apple shoulder reaches spoon');
+  assert.ok(largestStep < 0.055, 'do not teleport across the gap');
+});
+
+test('apple moving away from spoon does not trigger an accidental transfer', () => {
+  const s = miniatureSpawn('apple');
+  s.q = APPLE_METRICS.distances[4];
+  s.theta = 0.23;
+  s.p = applePoint(s.q, s.theta).map((v) => v * MINI_SCALE);
+  s.n = surfaceNormal('apple', s.q, s.theta);
+  const opposite = [-1, 0, 0];
+  for (let i = 0; i < 12; i += 1) move(s, opposite, 0.009);
+  assert.equal(s.surface, 'apple');
   valid(s);
 });
 
