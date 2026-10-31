@@ -114,6 +114,37 @@ function stepProfile(s, direction, step) {
   const kind = s.surface;
   const metrics = kind === 'plate' ? PLATE_METRICS : APPLE_METRICS;
   const p = surfacePoint(kind, s.q, s.theta);
+  // The old apple->spoon exit demanded <0.035 units to a single point AND
+  // an exact tangent direction. On touch controls that was essentially a
+  // pixel-perfect target on a curved surface.
+  // Guide only when a walker is ALREADY near the actual contact shoulder
+  // and intentionally aims out toward the spoon. Each substep still travels
+  // along the apple's surface, with no jumping to the endpoint.
+  let intendedDirection = direction;
+  let guideSpoon = false;
+  if (kind === 'apple') {
+    const contact = appleContact();
+    const contactQ = APPLE_METRICS.distances[4];
+    const diffQ = Math.abs(s.q - contactQ);
+    const angular = Math.atan2(Math.sin(s.theta), Math.cos(s.theta));
+    const contactDistance = length(sub(p, contact));
+    const outward = unit(tangent(sub(
+      [SPOON.start[0], p[1], SPOON.start[1]], p), s.n));
+    const towardContact = unit(tangent(sub(contact, p), s.n));
+    const deliberate = dot(direction, outward) > APPLE_SPOON_GUIDE.minApproachDot ||
+      (contactDistance > APPLE_SPOON_GUIDE.endDistance &&
+        dot(direction, towardContact) > 0.34);
+    guideSpoon = contactDistance < APPLE_SPOON_GUIDE.maxContactDistance &&
+      diffQ < 0.25 && Math.abs(angular) < 0.42 && deliberate;
+    if (guideSpoon && contactDistance > APPLE_SPOON_GUIDE.endDistance) {
+      intendedDirection = unit(add(mul(direction, 0.35), mul(towardContact, 0.65)));
+    }
+    if (guideSpoon && contactDistance <= APPLE_SPOON_GUIDE.endDistance) {
+      const { q: tipQ, theta: tipTheta } = topOfPlate(...SPOON.end);
+      attachProfile(s, 'plate', tipQ, tipTheta, direction);
+      return;
+    }
+  }
   const eps = 0.001;
   const a = sub(surfacePoint(kind, clamp(s.q + eps, 0, metrics.length), s.theta),
     surfacePoint(kind, clamp(s.q - eps, 0, metrics.length), s.theta));
@@ -121,9 +152,9 @@ function stepProfile(s, direction, step) {
     surfacePoint(kind, s.q, s.theta - eps));
   const aq = unit(a), bt = unit(b);
   const alignment = clamp(dot(aq, bt), -0.95, 0.95);
-  const qVelocity = (dot(direction, aq) - alignment * dot(direction, bt)) /
+  const qVelocity = (dot(intendedDirection, aq) - alignment * dot(intendedDirection, bt)) /
     (1 - alignment * alignment);
-  const thetaVelocity = (dot(direction, bt) - alignment * dot(direction, aq)) /
+  const thetaVelocity = (dot(intendedDirection, bt) - alignment * dot(intendedDirection, aq)) /
     (1 - alignment * alignment);
 
   const aScale = length(a) / (Math.min(metrics.length, s.q + eps) -
@@ -185,14 +216,8 @@ function stepProfile(s, direction, step) {
       }
     }
   } else {
-    const contact = appleContact();
-    const towardSpoon = unit([
-      SPOON.start[0] - SPOON.end[0], 0,
-      SPOON.start[1] - SPOON.end[1],
-    ]);
-    if (length(sub(p, contact)) < 0.035 &&
-        dot(direction, towardSpoon) > 0.17) {
-      // Fruit-to-handle contact is exactly the same authored world point.
+    if (guideSpoon && length(sub(next, appleContact())) <=
+        APPLE_SPOON_GUIDE.endDistance) {
       const { q: tipQ, theta: tipTheta } = topOfPlate(...SPOON.end);
       attachProfile(s, 'plate', tipQ, tipTheta, direction);
       return;
@@ -206,7 +231,7 @@ function stepProfile(s, direction, step) {
     }
   }
 
-  setPosition(s, next, surfaceNormal(kind, q, theta), direction);
+  setPosition(s, next, surfaceNormal(kind, q, theta), intendedDirection);
   s.q = q;
   s.theta = theta;
 }
