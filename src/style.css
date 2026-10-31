@@ -18,7 +18,8 @@
 }
 * { box-sizing: border-box; }
 html { min-width: 300px; background: var(--bg); }
-body { margin: 0; min-height: 100vh; color: var(--text); background: var(--bg); }
+body { margin: 0; min-height: 100vh; color: var(--text); background: var(--bg); overflow-x: hidden; }
+html { overflow-x: hidden; }
 button, select { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, select:focus-visible, input:focus-visible,
@@ -27,7 +28,8 @@ button:focus-visible, select:focus-visible, input:focus-visible,
   position: fixed;
   left: 0; top: 0;
   z-index: 1;
-  width: 100vw; height: 100vh;
+  /* Explicit inline pixel size comes from renderer.setSize(..., true). */
+  /* Avoid 100vh, which may include the collapsed mobile browser bars. */
   display: block;
   pointer-events: none;
 }

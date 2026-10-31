@@ -14,20 +14,30 @@ function stableTangent(reference, normal, previous = [1, 0, 0]) {
 
 export class SurfaceCamera {
   constructor(mode) {
-    this.mode = mode; // A = fixed world-axis projection; B = parallel transport.
+    this.mode = mode; // A: world reference projection; B: parallel transport.
     this.camera = new THREE.PerspectiveCamera(43, 1, 0.05, 100);
+    // This camera is mathematical only. It holds the exact, normal-aligned pose.
+    this.target = new THREE.PerspectiveCamera(43, 1, 0.05, 100);
     this.normal = [0, 1, 0];
     this.screenUp = [0, 0, -1];
     this.distance = 5.65;
+    // Physical camera follows target smoothly. The simulation never interpolates.
+    this.transitionSeconds = 0.22;
+  }
+
+  setTransitionMilliseconds(ms) {
+    this.transitionSeconds = Math.max(0, Math.min(0.8, ms / 1000));
   }
 
   reset(ant) {
     this.normal = [...ant.n];
     this.screenUp = stableTangent(NORTH, ant.n);
-    this.update(ant, 1);
+    this.update(ant);
+    this.present(0, true);
   }
 
-  update(ant, aspect = 1) {
+  // Called at fixed simulation steps: do not smooth the logical normal / frame.
+  update(ant) {
     if (this.mode === 'A') {
       this.screenUp = stableTangent(NORTH, ant.n, this.screenUp);
     } else {
@@ -36,20 +46,28 @@ export class SurfaceCamera {
     }
     this.normal = [...ant.n];
     const n = ant.n, p = ant.p;
-    const camera = this.camera;
-    camera.aspect = Math.max(0.2, aspect);
-    camera.updateProjectionMatrix();
-    camera.position.set(
+    this.target.position.set(
       p[0] + n[0] * this.distance,
       p[1] + n[1] * this.distance,
       p[2] + n[2] * this.distance,
     );
-    camera.up.set(...this.screenUp);
-    camera.lookAt(p[0], p[1], p[2]);
-    camera.updateMatrixWorld();
+    this.target.up.set(...this.screenUp);
+    this.target.lookAt(p[0], p[1], p[2]);
+    this.target.updateMatrixWorld();
   }
 
-  // Controls are interpreted in the active camera's local screen axes.
+  // Called on display frames, including after a paused world simulation.
+  // Damp only the DISPLAY pose: camera A/B surface rules remain exact.
+  present(dt, immediate = false) {
+    const t = immediate || this.transitionSeconds === 0
+      ? 1
+      : 1 - Math.exp(-Math.max(0, dt) / this.transitionSeconds);
+    this.camera.position.lerp(this.target.position, t);
+    this.camera.quaternion.slerp(this.target.quaternion, t);
+    this.camera.updateMatrixWorld();
+  }
+
+  // Controls use the visible screen axes, projected onto the REAL surface.
   direction(x, y) {
     const elements = this.camera.matrixWorld.elements;
     const right = [elements[0], elements[1], elements[2]];
