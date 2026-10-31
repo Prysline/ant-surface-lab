@@ -89,6 +89,33 @@ test('the stool touches the plate foot at the exterior radius only', () => {
   valid(s);
 });
 
+test('walk from stool through the narrow foot, underside, lip and onto the dish', () => {
+  const s = miniatureSpawn('stool');
+  const initial = local(s).p;
+  const toFoot = unit([-initial[0], 0, -initial[2]]);
+  for (let i = 0; i < 160 && s.surface === 'seat'; i += 1) {
+    move(s, toFoot, 0.01);
+  }
+  assert.equal(s.surface, 'plate');
+  const footQ = s.q;
+  let visitedUnderside = false, visitedRim = false, visitedTop = false;
+  for (let i = 0; i < 540 && s.surface === 'plate'; i += 1) {
+    move(s, s.f, 0.012);
+    valid(s);
+    if (s.q < footQ - 0.12 && s.q > PLATE_METRICS.distances[PLATE_TOP_END] + 0.12) {
+      visitedUnderside = true;
+    }
+    if (s.q < PLATE_METRICS.distances[PLATE_TOP_END] + 0.04) visitedRim = true;
+    if (s.q < PLATE_METRICS.distances[PLATE_TOP_END] - 0.12) {
+      visitedTop = true;
+      break;
+    }
+  }
+  assert.ok(visitedUnderside, 'walker must traverse underside');
+  assert.ok(visitedRim, 'walker must roll over ceramic lip');
+  assert.ok(visitedTop, 'walker must reach inner top');
+});
+
 test('ground to stool leg is still a real geometric contact', () => {
   const s = miniatureSpawn('ground');
   move(s, [1, 0, 0], 0.80);
@@ -162,6 +189,21 @@ test('walking surface on the spoon neck matches authored ceramic+metal height', 
   near(p[1], walkingHeight(p[0], p[2]), 1e-5);
   move(s, s.f, 0.012);
   valid(s);
+});
+
+test('walk continuously along the spoon handle onto the apple shoulder', () => {
+  const s = miniatureSpawn('spoon');
+  const direction = unit([
+    SPOON.end[0] - SPOON.start[0], 0,
+    SPOON.end[1] - SPOON.start[1],
+  ]);
+  let transitioned = false;
+  for (let i = 0; i < 130; i += 1) {
+    move(s, direction, 0.012);
+    valid(s);
+    if (s.surface === 'apple') { transitioned = true; break; }
+  }
+  assert.equal(transitioned, true, 'spoon-to-apple must be traversable without a reset');
 });
 
 test('fruit contact can connect to the tip of the raised spoon', () => {
