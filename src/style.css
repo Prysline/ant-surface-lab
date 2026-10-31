@@ -291,3 +291,8 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+
+/* Miniature scene anchor selector. Hidden on the analytic geometry tests. */
+.miniature-start { margin-top: 14px; padding-top: 12px; border-top: 1px solid #28424b; }
+.miniature-start[hidden] { display: none !important; }
