@@ -79,8 +79,21 @@
             <option value="cube">立方體 · 跨越直角邊緣</option>
             <option value="cylinder">圓柱體 · 曲率連續變化</option>
             <option value="sphere">球體 · 曲面閉合路徑</option>
+            <option value="miniature">微縮餐具場景 · 凳子／盤子／蘋果／湯匙</option>
           </select>
           <p class="note">切換地形會重設螞蟻位置與兩個鏡頭的初始朝向。</p>
+          <div id="miniature-start-control" class="miniature-start" hidden>
+            <label class="field-label" for="mini-start">微縮場景測試起點</label>
+            <select id="mini-start">
+              <option value="ground">P0 · 展示台地面</option>
+              <option value="leg">P1 · 凳腳中段</option>
+              <option value="stool">P2 · 凳面</option>
+              <option value="plate">P3 · 盤內</option>
+              <option value="apple">P4 · 蘋果頂部</option>
+              <option value="spoon">P5 · 湯匙柄</option>
+            </select>
+            <p class="note">選擇起點會重新開始測試；手動移動時則沿相連表面行走，不會瞬間傳送。</p>
+          </div>
         </section>
         <section class="panel">
           <div class="panel-heading"><span class="panel-number">02</span><h3>操作視角</h3></div>
@@ -123,6 +136,7 @@
             <div class="readout"><span>面朝方向</span><output id="heading">—</output></div>
             <div class="readout"><span>A／B 畫面上方夾角</span><output id="angle" class="accent-value">—</output></div>
             <div class="readout"><span>目前移動模式</span><output id="motion">—</output></div>
+            <div class="readout"><span>所在表面</span><output id="surface">—</output></div>
           </div>
           <label class="checkline"><input type="checkbox" id="trail" checked />顯示行走軌跡</label>
           <label class="field-label" for="transition">跨面鏡頭過渡</label>

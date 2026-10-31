@@ -91,7 +91,7 @@ export function makeMonitor(position, up = [0, 1, 0]) {
 }
 
 export function updateMonitorAspect(camera, aspect) {
-  const h = 2.65;
+  const h = camera.userData.halfHeight || 2.65;
   const w = Math.max(2.65, aspect * h);
   camera.left = -w;
   camera.right = w;
