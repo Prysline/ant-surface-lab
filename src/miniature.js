@@ -143,7 +143,7 @@ function localSpawn(name = 'ground') {
     return state('seat', [-1.10, walkingHeight(-1.10, 0.56), 0.56], walkingNormal(-1.10, 0.56), [1, 0, 0]);
   }
   if (name === 'plate') {
-    const x = 0.02, z = -0.72;
+    const x = 0.22, z = -0.92;
     return state('seat', [x, walkingHeight(x, z), z], walkingNormal(x, z), [0, 0, 1]);
   }
   if (name === 'apple') {
