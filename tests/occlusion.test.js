@@ -63,7 +63,8 @@ test('a cached result reuses hit points without rebuilding every display frame',
 
 test('shader inserts a local cutout without changing opacity or depth writing', () => {
   const state = {
-    center: new THREE.Vector3(1, 2, 3),
+    start: new THREE.Vector3(1, 2, 3),
+    end: new THREE.Vector3(4, 5, 6),
     radius: { value: DEFAULT_REVEAL_RADIUS },
     enabled: { value: 0 },
   };
@@ -74,11 +75,15 @@ test('shader inserts a local cutout without changing opacity or depth writing', 
   };
   injectRevealMask(shader, state);
   assert.ok(shader.vertexShader.includes('vAslRevealWorld = (modelMatrix'));
-  assert.ok(shader.fragmentShader.includes('distance(vAslRevealWorld, aslRevealCenter)'));
+  assert.ok(shader.fragmentShader.includes('distance(vAslRevealWorld, closest)'));
+  assert.ok(shader.fragmentShader.includes('aslRevealEnd - aslRevealStart'));
+  assert.ok(shader.fragmentShader.includes('dot(path, path)'));
+  assert.ok(shader.fragmentShader.includes('discard;'))
   assert.ok(shader.fragmentShader.includes('discard;'));
   assert.ok(shader.fragmentShader.includes('gl_FragCoord.xy'));
   assert.ok(!shader.fragmentShader.includes('gl_FragColor.a'));
-  assert.equal(shader.uniforms.aslRevealCenter.value, state.center);
+  assert.equal(shader.uniforms.aslRevealStart.value, state.start);
+  assert.equal(shader.uniforms.aslRevealEnd.value, state.end);
   assert.equal(shader.uniforms.aslRevealEnabled, state.enabled);
 });
 
@@ -88,7 +93,9 @@ test('only selected occlusion mesh receives an active LOCAL mask while rendering
   const a = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared);
   const b = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared);
   group.add(a, b);
-  const hit = { mesh: a, point: new THREE.Vector3(2, 3, 4) };
+  const hit = { mesh: a, point: new THREE.Vector3(2, 3, 4),
+    rayStart: new THREE.Vector3(2, 3, 7),
+    rayEnd: new THREE.Vector3(2, 3, 0) };
   renderWithOcclusion([hit], () => {
     assert.equal(a.material.transparent, false);
     assert.equal(a.material.depthWrite, true);
@@ -99,7 +106,8 @@ test('only selected occlusion mesh receives an active LOCAL mask while rendering
     const uniforms = a.userData.antRevealMaterials[0].uniforms;
     assert.equal(uniforms.enabled.value, 1);
     assert.equal(uniforms.radius.value, DEFAULT_REVEAL_RADIUS);
-    assert.ok(uniforms.center.equals(hit.point));
+    assert.ok(uniforms.start.equals(hit.rayStart));
+    assert.ok(uniforms.end.equals(hit.rayEnd));
   });
   assert.equal(a.material.transparent, false);
   assert.equal(a.material.depthWrite, true);
@@ -112,12 +120,14 @@ test('two camera passes share no active reveal and reuse shader material clones'
     new THREE.MeshStandardMaterial({ color: 0xcc4433 }));
   const first = new THREE.Vector3(0, 1, 1);
   const second = new THREE.Vector3(1, 1, 0);
-  renderWithOcclusion([{ mesh: m, point: first }], () => {});
+  renderWithOcclusion([{ mesh: m, point: first,
+    rayStart: new THREE.Vector3(0, 0, 7), rayEnd: first }], () => {});
   const material = m.material;
   assert.equal(m.userData.antRevealMaterials[0].uniforms.enabled.value, 0);
-  renderWithOcclusion([{ mesh: m, point: second }], () => {
+  renderWithOcclusion([{ mesh: m, point: second,
+    rayStart: new THREE.Vector3(0, 0, 7), rayEnd: second }], () => {
     assert.equal(m.material, material);
-    assert.ok(m.userData.antRevealMaterials[0].uniforms.center.equals(second));
+    assert.ok(m.userData.antRevealMaterials[0].uniforms.end.equals(second));
     assert.equal(m.userData.antRevealMaterials[0].uniforms.enabled.value, 1);
   }, 1.2);
   assert.equal(m.userData.antRevealMaterials[0].uniforms.enabled.value, 0);
@@ -127,7 +137,8 @@ test('reveal mask switches off when rendering throws', () => {
   const m = new THREE.Mesh(new THREE.BoxGeometry(),
     new THREE.MeshStandardMaterial());
   assert.throws(() =>
-    renderWithOcclusion([{ mesh: m, point: new THREE.Vector3() }],
+    renderWithOcclusion([{ mesh: m, point: new THREE.Vector3(),
+      rayStart: new THREE.Vector3(0, 0, 7), rayEnd: new THREE.Vector3() }],
       () => { throw new Error('WebGL context lost'); }),
   /WebGL context lost/);
   assert.equal(m.material.transparent, false);
