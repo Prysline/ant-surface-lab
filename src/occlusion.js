@@ -79,7 +79,8 @@ export function injectRevealMask(shader, state) {
       !shader.fragmentShader.includes(fragmentAnchor)) {
     throw new Error('Local ant reveal requires Three.js mesh shader chunks');
   }
-  shader.uniforms.aslRevealCenter = { value: state.center };
+  shader.uniforms.aslRevealStart = { value: state.start };
+  shader.uniforms.aslRevealEnd = { value: state.end };
   shader.uniforms.aslRevealRadius = state.radius;
   shader.uniforms.aslRevealEnabled = state.enabled;
 
@@ -93,13 +94,18 @@ export function injectRevealMask(shader, state) {
 
   const fragDeclarations = [
     'varying vec3 vAslRevealWorld;',
-    'uniform vec3 aslRevealCenter;',
+    'uniform vec3 aslRevealStart;',
+    'uniform vec3 aslRevealEnd;',
     'uniform float aslRevealRadius;',
     'uniform float aslRevealEnabled;',
   ].join('\n');
   const fragCutout = [
     'if (aslRevealEnabled > 0.5) {',
-    '  float revealDistance = distance(vAslRevealWorld, aslRevealCenter);',
+    '  vec3 path = aslRevealEnd - aslRevealStart;',
+    '  float fraction = clamp(dot(vAslRevealWorld - aslRevealStart, path) /',
+    '    max(dot(path, path), 0.000001), 0.0, 1.0);',
+    '  vec3 closest = aslRevealStart + path * fraction;',
+    '  float revealDistance = distance(vAslRevealWorld, closest);',
     '  float revealAmount = 1.0 - smoothstep(',
     '    aslRevealRadius * 0.73, aslRevealRadius, revealDistance',
     '  );',
@@ -123,7 +129,8 @@ function ensureRevealMaterial(mesh) {
   const states = original.map((old) => {
     const material = old.clone();
     const uniforms = {
-      center: new THREE.Vector3(),
+      start: new THREE.Vector3(),
+      end: new THREE.Vector3(),
       radius: { value: DEFAULT_REVEAL_RADIUS },
       enabled: { value: 0 },
     };
@@ -147,7 +154,8 @@ export function renderWithOcclusion(blockers, render, radius = DEFAULT_REVEAL_RA
     for (const hit of blockers) {
       const materials = ensureRevealMaterial(hit.mesh);
       for (const { uniforms } of materials) {
-        uniforms.center.copy(hit.point);
+        uniforms.start.copy(hit.rayStart);
+        uniforms.end.copy(hit.rayEnd);
         uniforms.radius.value = radius;
         uniforms.enabled.value = 1;
         active.push(uniforms);
