@@ -292,8 +292,13 @@ function reset(shape = $('shape').value) {
   updateTrail();
   const miniature = shape === 'miniature';
   $('miniature-start-control').hidden = !miniature;
-  cameraA.distance = miniature ? 4.7 : 5.65;
-  cameraB.distance = miniature ? 4.7 : 5.65;
+  // Both A/B get the SAME distance, keeping the comparison fair.
+  // At x4 miniature scale, 4.7 world units made even a plate rim fill
+  // the whole view. Default to a more readable 7.8.
+  const distance = miniature ? Number($('camera-distance').value) : 5.65;
+  cameraA.distance = distance;
+  cameraB.distance = distance;
+  $('miniature-camera-distance').hidden = !miniature;
   for (const monitor of Object.values(monitors)) {
     monitor.userData.halfHeight = miniature ? 3.7 * MINI_SCALE : 2.65;
   }
@@ -413,8 +418,10 @@ function renderView(element, camera) {
   renderer.setScissorTest(true);
   renderer.setClearColor(0x142833, 1);
   renderer.clear(true, true, true);
-  if (occlusionEnabled && ant.shape === 'miniature') {
-    // Different camera views fade different meshes, never the entire world.
+  if (occlusionEnabled && ant.shape === 'miniature' &&
+      (camera === cameraA.camera || camera === cameraB.camera)) {
+    // Make a local screen-door reveal only where foreground geometry covers
+    // the ant; leave fixed monitoring views completely opaque.
     const antTarget = antRoot.localToWorld(new THREE.Vector3(0, 0.20, 0));
     const blockers = getCachedBlockers(camera, antTarget, geometryGroup);
     renderWithOcclusion(blockers, () => renderer.render(scene, camera));
@@ -469,6 +476,14 @@ $('pause').addEventListener('click', () => {
   paused = !paused;
   $('pause').textContent = paused ? '繼續' : '暫停';
   $('status').textContent = paused ? '已暫停' : (demo ? '路徑演示中' : '手動操作');
+});
+$('camera-distance').addEventListener('change', (event) => {
+  if (ant.shape !== 'miniature') return;
+  const distance = Number(event.target.value);
+  cameraA.distance = distance;
+  cameraB.distance = distance;
+  cameraA.update(ant);
+  cameraB.update(ant);
 });
 $('occlusion').addEventListener('change', (event) => {
   occlusionEnabled = event.target.checked;
