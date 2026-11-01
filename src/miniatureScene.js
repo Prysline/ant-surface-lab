@@ -214,6 +214,7 @@ export function createMiniatureScene(group) {
     }),
   );
   platformBorder.position.y = MINI.floorY - 0.11;
+  platformBorder.layers.set(1); // Diagnostic outline only in fixed monitors.
   group.add(platformBorder);
 
   const legHeight = MINI.seatY - MINI.floorY;
@@ -237,6 +238,7 @@ export function createMiniatureScene(group) {
     }),
   );
   stoolEdges.position.y = MINI.seatY - thickness / 2;
+  stoolEdges.layers.set(1); // Avoid stray overlay lines in A/B.
   group.add(stoolEdges);
 
   const { plateMesh, underMesh } = createDish(group, ceramic, underside);
