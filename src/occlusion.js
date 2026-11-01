@@ -39,6 +39,8 @@ export function findBlockingMeshes(camera, antPoint, root, maxBlockers = 3) {
     blockers.push({
       mesh,
       point: hit.point.clone(),
+      rayStart: camera.position.clone(),
+      rayEnd: antPoint.clone(),
       distance: hit.distance,
     });
     if (blockers.length >= maxBlockers) break;
